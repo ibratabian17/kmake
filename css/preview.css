@@ -38,7 +38,7 @@
     display: none;
 
     width: calc(100% - 10px);
-    overflow: hidden;
+    overflow: visible;
     white-space: nowrap;
 }
 
