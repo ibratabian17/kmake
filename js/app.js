@@ -10,6 +10,7 @@ let filename = ''; // name of the file
 let selectedWordIndex = -1; // index of the selected word
 let played_word = ''; // word that is currently being played
 let music_file = null; // music file
+let isVisible = true;
 
 // dom elements
 const elem_part_sortable = document.getElementsByClassName('part-sortable');
@@ -17,6 +18,8 @@ const elem_musicInput = document.getElementById('music-input');
 const elem_musicPlayer = document.getElementById('music-player');
 const elem_lyricsInput = document.getElementById('lyrics-input');
 const elem_lyricsContent = document.getElementById('lyrics-content');
+const elem_navbar = document.getElementById('navbar');
+const elem_showMenu = document.querySelector('.show-more');
 
 // plyr
 const player = new Plyr(elem_musicPlayer, {
@@ -26,6 +29,16 @@ const player = new Plyr(elem_musicPlayer, {
         options: [0.5, 0.75, 1, 1.5]
     }
 });
+
+elem_showMenu.onclick = function(){
+    if(isVisible){
+        elem_navbar.setAttribute('visible', 'false')
+        isVisible = false
+    } else {
+        elem_navbar.setAttribute('visible', 'true')
+        isVisible = true
+    }
+}
 
 // sortable
 for (let i = 0; i < elem_part_sortable.length; i++) {
@@ -89,8 +102,10 @@ function reset() {
 
 function importSong() {
     elem_musicInput.type = 'file';
-    elem_musicInput.accept = '.mp3, .wav, .ogg, .flac, .m4a, .mp4';
+    elem_musicInput.accept = '.mp3, .wav, .ogg, .flac, .m4a, .mp4, .opus, .mkv, .webm, .m3u8';
     elem_musicInput.click();
+    elem_navbar.setAttribute('visible', 'false')
+    isVisible = false
 }
 
 function importJSON(files) {
@@ -109,7 +124,11 @@ function importJSON(files) {
         const reader = new FileReader();
         reader.readAsText(file, 'UTF-8');
         reader.onload = function(evt) {
-            const json = JSON.parse(evt.target.result);
+            console.log(evt.target.result)
+            let json = JSON.parse(evt.target.result);
+            if(json.lyrics){
+                json = json.lyrics
+            }
 
             // clear elem_lyricsContent
             elem_lyricsContent.innerHTML = '';
@@ -138,7 +157,7 @@ function importJSON(files) {
                 const p = document.querySelectorAll('.lyrics-line')[isLineEndingCounter];
                 const span = document.createElement('span');
                 span.classList.add('lyrics-word');
-                span.innerText = word.text + ' ';
+                span.innerText = word.text;
                 p.appendChild(span);
 
                 if(word.isLineEnding === 1) {
@@ -369,9 +388,11 @@ function previewToggle() {
     document.getElementById('lyrics-content').classList.toggle('preview');
 
     if (document.querySelector('#preview-mode').innerHTML == 'Preview mode') {
+        document.querySelector('.part-left').setAttribute('visible', 'false');
         document.querySelector('#preview-mode').innerHTML = 'Edit mode';
     }
     else {
+        document.querySelector('.part-left').setAttribute('visible', 'true');
         document.querySelector('#preview-mode').innerHTML = 'Preview mode';
     }
 
@@ -673,7 +694,7 @@ setInterval(() => {
         
         lyricsContent.scrollTop = currentLineTop - lyricsContent.clientHeight / 2 + 120;
     }
-}, 30);
+}, 1);
 
 // events
 elem_musicInput.addEventListener('change', function() {
@@ -688,9 +709,9 @@ elem_musicInput.addEventListener('change', function() {
 
     jsmediatags.read(file, {
         onSuccess: function(tag) {
-            document.getElementById('music-title').innerText = tag.tags.title;
-            document.getElementById('music-artist').innerText = tag.tags.artist;
-            document.getElementById('music-album').innerText = tag.tags.album;
+            document.getElementById('music-title').innerText = tag.tags.title || "Unknown Title";
+            document.getElementById('music-artist').innerText = tag.tags.artist || "Unknown Artist";
+            document.getElementById('music-album').innerText = tag.tags.album || "Unknown Album";
 
             // Array buffer to base64
             const data = tag.tags.picture.data

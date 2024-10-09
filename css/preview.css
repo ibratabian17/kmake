@@ -1,5 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@800&display=swap');
 
+@font-face {
+    font-family: 'JD_Regular';
+    src: url('https://jdnowweb-s.cdn.ubi.com/prod/main/20241009_1018/web/fonts/JD_Regular.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+}
+
+
 #lyrics-content.preview {
     background: #000;
 
@@ -18,7 +26,8 @@
 
 /* jd2014 */
 #lyrics-content.preview[data-theme="jd2014"] .lyrics-word {
-    font-family: Arial, Helvetica, sans-serif;
+    font-family: JD_Regular, Arial, Helvetica, sans-serif!important;
+    letter-spacing: 0.03em;
 }
 
 #lyrics-content.preview[data-theme="jd2014"] .lyrics-word:hover {
@@ -41,7 +50,7 @@
     top: calc(0px + var(--offset-y));
     left: calc(0px + var(--offset-x));
 
-    animation: playing-line 200ms linear;
+    animation: playing-line 300ms ease-out;
 }
 
 @keyframes playing-line {
@@ -287,4 +296,37 @@
     100% {
         background-position: 0% 50%;
     }
+}
+
+/*Apple Music */
+#lyrics-content.preview[data-theme="applemusic"] {
+    background: rgb(93, 20, 189);
+
+    gap: 14px;
+
+    padding-left: 24px;
+    padding-right: 24px;
+
+    width: calc(100% - 24px * 2);
+}
+
+#lyrics-content.preview[data-theme="applemusic"] .lyrics-word {
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-size: 28px;
+}
+
+#lyrics-content.preview[data-theme="applemusic"] .lyrics-line .lyrics-word {
+    color: #000 !important;
+}
+
+#lyrics-content.preview[data-theme="applemusic"] .lyrics-line .past-word {
+    color: #fff !important;
+}
+
+#lyrics-content.preview[data-theme="applemusic"] .playing-line .lyrics-word {
+    color: #ffffff50 !important;
+}
+
+#lyrics-content.preview[data-theme="applemusic"] .playing-line .past-word, #lyrics-content.preview[data-theme="spotify"] .playing-line .playing-word {
+    color: #fff !important;
 }

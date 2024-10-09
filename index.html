@@ -10,18 +10,18 @@
         <title>kmake - online JSON lyrics generator</title>
         <meta name="description" content="Introducing a new way to make and preview lyrics, right in your web browser.">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link rel="shortcut icon" href="/assets/kmake-icon.png" type="image/png">
+        <link rel="shortcut icon" href="assets/kmake-icon.png" type="image/png">
         <link rel="stylesheet" href="css/normalize.css">
         <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
         <link rel="stylesheet" href="css/main.css">
         <link rel="stylesheet" href="css/preview.css">
-        <link rel="manifest" href="/manifest.webmanifest">
+        <link rel="manifest" href="manifest.webmanifest">
         <meta property="og:title" content="kmake - online JSON lyrics generator" />
         <meta property="og:description" content="Introducing a new way to make and preview lyrics, right in your web browser." />
         <meta property="og:site_name" content="kmake" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://kmake.vincelinise.me" />
-        <meta property="og:image" content="/images/banner.jpg" />
+        <meta property="og:image" content="images/banner.jpg" />
     </head>
     <body>
         <!--[if lt IE 7]>
@@ -33,13 +33,13 @@
                 <svg class="circular" height="50" width="50">
                     <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="6" stroke-miterlimit="10" />
                 </svg>
-                <p class="loadingText">Loading the most amazing JSON lyrics maker...</p>
+                <p class="loadingText">Loading Kmake...</p>
             </div>
         </div>
 
         <div id="header">
             <div class="header-content">
-                <img src="/assets/kmake-logo.png" class="logo"/>
+                <img src="assets/kmake-logo.png" class="logo"/>
 
                 <div class="buttons-actions">
                     <button onclick="reset()">New</button>
@@ -51,30 +51,6 @@
 
         <div id="app">
             <div class="part part-sortable part-left">
-                <div class="inner-part inner-music">
-                    <div class="inner-part-title">
-                        <p>Music</p>
-                    </div>
-                    <div class="inner-part-buttons buttons-top">
-                        <button onclick="importSong()" id="lyrics-button">Import</button>
-                        <button onclick="playPause()" id="playpause-button">Play/Pause <span>(Space)</span></button>
-                        <button onclick="reset()" id="lyrics-button">Reset</button>
-                    </div>
-                    <div class="inner-part-content">
-                        <div class="music_data">
-                            <img id="music-album-art" />
-                            <div class="music-data-text">
-                                <p id="music-title"></p>
-                                <p id="music-artist"></p>
-                                <p id="music-album"></p>
-                            </div>
-                        </div>
-                        <input type="file" id="music-input"/>
-                    </div>
-                    <div class="music-inner">
-                        <audio id="music-player" controls></audio>
-                    </div>
-                </div>
                 <div class="inner-part">
                     <div class="inner-part-title">
                         <p>Lyrics</p>
@@ -161,17 +137,34 @@
                         </div>
                     </div>
                 </div>
-                <div class="inner-part part-about">
-                    <div class="inner-part-title">
-                        <p>About this app</p>
-                    </div>
-                    <div class="inner-part-content">
-                        <img src="/assets/kmake-logo.png" class="logo"/>
+            </div>
+        </div>
 
-                        <p>version 0.0.4</p>
-                        <p>made by ecnivtwelve</p>
+        <div id="navbar" class="inner-part inner-music" visible="true">
+            <div class="richer-music">
+            <div class="inner-part-title">
+                <p>Music</p>
+            </div>
+            <div class="inner-part-buttons buttons-top">
+                <button onclick="importSong()" id="lyrics-button">Import</button>
+                <button onclick="playPause()" id="playpause-button">Play/Pause <span>(Space)</span></button>
+                <button onclick="reset()" id="lyrics-button">Reset</button>
+            </div>
+            <div class="inner-part-content">
+                <div class="music_data">
+                    <img id="music-album-art" />
+                    <div class="music-data-text">
+                        <p id="music-title"></p>
+                        <p id="music-artist"></p>
+                        <p id="music-album"></p>
                     </div>
                 </div>
+                <input type="file" id="music-input"/>
+            </div>
+        </div>
+            <div class="music-inner">
+                <audio id="music-player" controls></audio>
+                <div class="show-more"></div>
             </div>
         </div>
         
