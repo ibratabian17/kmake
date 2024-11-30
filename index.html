@@ -42,9 +42,9 @@
                 <img src="assets/kmake-logo.png" class="logo"/>
 
                 <div class="buttons-actions">
-                    <button onclick="reset()">New</button>
-                    <button onclick="importKMAKE()">Open</button>
-                    <button onclick="exportKMAKE()">Save as</button>
+                    <button id="file-drop">File</button>
+                    <button id="preview-drop">Preview</button>
+                    <button id="about-drop">About</button>
                 </div>
             </div>
         </div>
@@ -69,9 +69,6 @@
                     </div>
                     <div class="inner-part-buttons buttons-top">
                         <button onclick="nextWord()" id="nextword-button">Next word <span>(Enter)</span></button>
-
-                        <button id="export-drop">Export as <i data-lucide="chevron-down"></i></button>
-
                         <button id="preview-mode" onclick="previewToggle()" id="json-button">Preview mode</button>
                     </div>
                     <div id="lyrics-content" data-theme="jd2014" class="inner-part-content">

@@ -3,7 +3,9 @@ const jsmediatags = window.jsmediatags
 
 // global variables
 let currentLyrics = [] // (final JSON) -> array of lyrics
+let tempLyrics = [];
 let currentWordIndex = 0; // index of the currently recorded word
+let lastWordIndex = 0;
 let goBackIndex = 0; // index of the word to go back to (arrow keys)
 let importedJSON = false; // if the lyrics have been imported from a JSON file
 let filename = ''; // name of the file
@@ -11,6 +13,10 @@ let selectedWordIndex = -1; // index of the selected word
 let played_word = ''; // word that is currently being played
 let music_file = null; // music file
 let isVisible = true;
+const AppVersion = {
+    version: '1.0.0',
+    customName: 'Ibratabian17\'s Fork'
+}
 
 // dom elements
 const elem_part_sortable = document.getElementsByClassName('part-sortable');
@@ -30,8 +36,8 @@ const player = new Plyr(elem_musicPlayer, {
     }
 });
 
-elem_showMenu.onclick = function(){
-    if(isVisible){
+elem_showMenu.onclick = function () {
+    if (isVisible) {
         elem_navbar.setAttribute('visible', 'false')
         isVisible = false
     } else {
@@ -57,7 +63,7 @@ for (let i = 0; i < elem_part_sortable.length; i++) {
             },
             get: function (sortable) {
                 var order = localStorage.getItem(sortable.options.group.name);
-			    return order ? order.split('|') : [];
+                return order ? order.split('|') : [];
             }
         }
     });
@@ -65,9 +71,9 @@ for (let i = 0; i < elem_part_sortable.length; i++) {
 
 // tools
 function msToTime(duration) {
-    let milliseconds = parseInt((duration%1000)/10);
-    let seconds = parseInt((duration/1000)%60);
-    let minutes = parseInt((duration/(1000*60))%60);
+    let milliseconds = parseInt((duration % 1000) / 10);
+    let seconds = parseInt((duration / 1000) % 60);
+    let minutes = parseInt((duration / (1000 * 60)) % 60);
 
     milliseconds = (milliseconds < 10) ? '0' + milliseconds : milliseconds;
     seconds = (seconds < 10) ? '0' + seconds : seconds;
@@ -109,103 +115,129 @@ function importSong() {
 }
 
 function importJSON(files) {
-    var input = document.createElement('input');
+    const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
 
-    if(!files) {
+    if (!files) {
         input.click();
     }
 
     importedJSON = true;
 
-    input.addEventListener('change', function() {
+    input.addEventListener('change', function () {
         const file = this.files[0];
         const reader = new FileReader();
         reader.readAsText(file, 'UTF-8');
-        reader.onload = function(evt) {
-            console.log(evt.target.result)
-            let json = JSON.parse(evt.target.result);
-            if(json.lyrics){
-                json = json.lyrics
-            }
+        reader.onload = function (evt) {
+            const json = parseJsonToLyrics(JSON.parse(evt.target.result));
+            const lyricsData = Array.isArray(json) ? json : json.lyrics || [];
 
-            // clear elem_lyricsContent
+            // Clear the current lyrics content
             elem_lyricsContent.innerHTML = '';
-            
-            inc = 0;
 
-            // for each word, add a <p> when isLineEnding is 1
-            json.forEach(word => {
-                if(word.isLineEnding === 1) {
-                    const p = document.createElement('p');
-                    p.classList.add('lyrics-line');
-                    if(inc % 2 === 0) {
-                        p.classList.add('even');
+            let currentLine = null; // Store the current line as an array
+            let isNewLine = true; // Flag to check if we need to start a new line
+
+            // Iterate through the provided lyrics array
+            lyricsData.forEach((lyric, index) => {
+                if (isNewLine) {
+                    currentLine = document.createElement('p');
+                    currentLine.classList.add('lyrics-line');
+                    // Add class for even or odd lines
+                    currentLine.classList.add(lyric.lineIndex % 2 === 0 ? 'even' : 'odd');
+                    if (lyric.isTaggedLine) {
+                        currentLine.classList.add('tagged-line');
                     }
-                    else {
-                        p.classList.add('odd');
-                    }
-                    elem_lyricsContent.appendChild(p);
-                    inc++;
+                    isNewLine = false; // We are adding words to a new line
                 }
-            });
 
-            // for each word, add a <span> tag in the right <p> tag
-            let isLineEndingCounter = 0;
-            json.forEach(word => {
-                const p = document.querySelectorAll('.lyrics-line')[isLineEndingCounter];
                 const span = document.createElement('span');
                 span.classList.add('lyrics-word');
-                span.innerText = word.text;
-                p.appendChild(span);
+                span.innerText = lyric.text;
+                span.id = 'word-' + index;
+                if(isRTL(lyric.text))span.classList.add('rtl-word')
+                span.style.setProperty('--duration', lyric.duration + 'ms');
+                lyricsData[index].element = span
+                currentLine.appendChild(span);
 
-                if(word.isLineEnding === 1) {
-                    isLineEndingCounter++;
+                // If it's the end of the line, append the currentLine and reset the flag
+                if (lyric.isLineEnding) {
+                    elem_lyricsContent.appendChild(currentLine);
+                    isNewLine = true; // Prepare for the next line
                 }
             });
 
-            // for each word, set id to word-<index>
-            document.querySelectorAll('.lyrics-word').forEach(word => {
-                const index = Array.from(document.querySelectorAll('.lyrics-word')).indexOf(word);
-                word.id = 'word-' + index.toString();
-                
-                try {
-                    word.style.setProperty('--duration', json[index].duration + 'ms');
-                }
-                catch(error) {
-                    console.error(error);
-                }
-            });
-
-            // set currentLyrics to json
-            for(let i = 0; i < json.length; i++) {
-                const word = json[i];
-                currentLyrics.push(word);
-            }
-
-            // replace element in currentLyrics with element from elem_lyricsContent
-            currentLyrics.forEach(word => {
-                const index = currentLyrics.indexOf(word);
-                const element = document.getElementById('word-' + index.toString());
-                word.element = element;
-            });
-
-            // set all words to done-word
-            const words = document.querySelectorAll('.lyrics-word');
-            words.forEach(word => {
-                word.classList.add('done-word');
-            });
-
-            // set currentWordIndex to last word
-            currentWordIndex = currentLyrics.length - 1;
-        }
+            tempLyrics = lyricsData;
+            currentWordIndex = tempLyrics.length - 1;
+        };
     });
 
-    if(files) {
+    if (files) {
         input.files = files;
         input.dispatchEvent(new Event('change'));
     }
+}
+
+
+function parseJsonToLyrics(jsonData) {
+    const newLyrics = [];
+    let previousSongPart = null; // Track previous songPart to avoid repeating it
+    let offset = 0;
+    let lineIndex = 0; // Starting line index, incremented per line
+
+    jsonData.forEach((item, idx) => {
+        const words = item.text;
+
+        // If the songPart changes, add a tagline
+        if (item.element.songPart !== previousSongPart) {
+            // Add a tagged line for the songPart if it's different from the previous one
+            const tagFormat = {
+                time: 0,
+                duration: 0,
+                text: "#" + item.element.songPart,
+                isLineEnding: true,
+                isTaggedLine: true,
+                tag: item.element.songPart,
+                tempElement: {
+                    key: `L${lineIndex}`,
+                    songPart: item.element.songPart,
+                    singer: item.element.singer
+                },
+                element: {},
+                offset: offset,
+                lineIndex: lineIndex,
+                wordIndex: offset
+            };
+            newLyrics.push(tagFormat); // Add the tag to the new lyrics
+            previousSongPart = item.element.songPart; // Update previous songPart to current one
+        }
+        const wordData = {
+            time: item.time, // Keep the time from the original JSON
+            duration: item.duration, // Duration remains the same
+            text: words,
+            isLineEnding: item.isLineEnding == 1, // Last word in line is a line-ending
+            isTaggedLine: false, // It's not a tagged line unless it's set otherwise
+            tag: null, // No tag unless it's a tagged line
+            tempElement: {
+                key: `L${lineIndex}`,
+                songPart: item.element.songPart,
+                singer: item.element.singer
+            },
+            element: {}, // Empty object as we're not using the DOM
+            offset: offset,
+            lineIndex: lineIndex,
+            wordIndex: offset
+        };
+
+        newLyrics.push(wordData); // Add the word data to the new lyrics
+        if (item.isLineEnding == 1) lineIndex++;
+        offset++; // Increment offset after adding each word
+
+        if (item.isLineEnding == 1) lineIndex++; // Increment lineIndex for the next set of lyrics
+    });
+
+    return newLyrics; // Return the final array of lyrics
 }
 
 function parseLyrics() {
@@ -213,161 +245,203 @@ function parseLyrics() {
         return;
     }
 
-    let jsonText = null;
-
     elem_lyricsContent.innerHTML = '';
 
-    let inc = 0;
+    const newLyrics = [];
+    const lines = `${elem_lyricsInput.value}\n#ENDOFLINE`.split('\n');
+    let offset = 0;
+    let tempIndex = 0; // Indeks untuk melacak posisi dalam tempLyrics
+    let currentTag = "";
 
-    // for each line, add a <p> tag in the lyrics-content div
-    const lines = elem_lyricsInput.value.split('\n');
-    lines.forEach(line => {
+    lines.forEach((line, lineIndex) => {
         const p = document.createElement('p');
         p.classList.add('lyrics-line');
+        p.classList.add(lineIndex % 2 === 0 ? 'even' : 'odd');
 
-        // if inc is even, add .even to the <p> tag, else add .odd
-        if(inc % 2 === 0) {
-            p.classList.add('even');
-        }
-        else {
-            p.classList.add('odd');
+        let isTaggedLine = false;
+
+        // Cek apakah baris ini memiliki tag
+        const firstWord = line.trim().split(' ')[0];
+        if (firstWord.startsWith('#')) {
+            isTaggedLine = true;
+            currentTag = firstWord.substring(1); // Simpan tag tanpa #
+            p.classList.add('tagged-line'); // Tambahkan class untuk baris
         }
 
-        // for each word, add a <span> tag in the <p> tag
         const words = line.split(' ');
-        words.forEach(word => {
+        words.forEach((word, wordIndex) => {
             const span = document.createElement('span');
-            span.classList.add('lyrics-word');
+            const wordText = word;
 
-            if(word.trim() === '') {
-                span.innerText = ' ';
-                span.classList.add('lyrics-space');
-                p.appendChild(span);
-                return;
+            span.classList.add('lyrics-word');
+            span.innerText = wordText + ' ';
+
+            // Cari data sebelumnya di tempLyrics
+            let existingData = tempLyrics.find(tempItem => 
+                tempItem.text.trim() === wordText.trim() &&
+                tempItem.lineIndex === lineIndex &&
+                tempItem.wordIndex === wordIndex
+            );
+
+            if (!existingData) {
+                existingData = {
+                    time: 0, // Default time
+                    duration: 0, // Default duration
+                    text: (wordIndex === words.length - 1) ? wordText : wordText + ' ',
+                    isLineEnding: wordIndex === words.length - 1,
+                    isTaggedLine: isTaggedLine, // Tandai apakah ini bagian dari tagged line
+                    tag: isTaggedLine ? currentTag : null, // Simpan tag jika ada
+                    tempElement: { key: `L${lineIndex}`, songPart: currentTag, singer: 'v1' }, //need to change v1 help
+                    element: null, // Akan di-update dengan DOM element
+                    offset,
+                    lineIndex, // Simpan indeks baris
+                    wordIndex // Simpan indeks kata di dalam baris
+                };
+            } else {
+                // Update jika sudah ada data
+                existingData.isLineEnding = wordIndex === words.length - 1;
             }
 
-            span.innerText = word + ' ';
-            p.appendChild(span);
-        });
-        elem_lyricsContent.appendChild(p);
+            if (wordText.trim() == '') {
+                span.classList.add('lyrics-space');
+            }
+            if (isRTL(wordText)) {
+                span.classList.add('rtl-word');
+            }
 
-        inc++;
+            if (existingData.isDone) {
+                span.classList.add('done-word');
+            }
+
+            existingData.element = span;
+            span.id = 'word-' + offset;
+
+            p.appendChild(span);
+            newLyrics.push(existingData); // Tambahkan ke array sinkronisasi
+            offset++;
+        });
+
+        elem_lyricsContent.appendChild(p);
+    });
+
+    // Perbarui tempLyrics tanpa menghapus data sebelumnya
+    tempLyrics = newLyrics.map((item, index) => {
+        const existingItem = tempLyrics.find(tempItem => tempItem.offset === index);
+        return existingItem ? { ...existingItem, ...item } : item;
     });
 }
 
+
 function nextWord() {
     const NextWordButton = document.getElementById('nextword-button');
-
     NextWordButton.classList.add('enabled');
     setTimeout(() => {
         NextWordButton.classList.remove('enabled');
     }, 50);
 
-    // get time of elem_musicPlayer in milliseconds
     const time = elem_musicPlayer.currentTime * 1000;
+    let currentWord = tempLyrics[currentWordIndex];
+    let lastWord = tempLyrics[currentWordIndex - 1];
+    lastWordIndex = currentWordIndex - 1
 
-
-    let currentWord = document.querySelectorAll('.lyrics-word')[currentWordIndex];
-    let lastWord = document.querySelectorAll('.lyrics-word')[currentWordIndex - 1];
-    let nextWord = document.querySelectorAll('.lyrics-word')[currentWordIndex + 1];
-    
-    // if playing-word is behind current-word, delete everything after playing-word in currentLyrics and go back to it
-    if(document.querySelector('.playing-word')) {
-        const playingWord = document.querySelector('.playing-word');
-        const playingWordIndex = Array.from(document.querySelectorAll('.lyrics-word')).indexOf(playingWord);
-        if(playingWordIndex < currentWordIndex) {
-            // delete everything after playing-word in currentLyrics
-            currentLyrics = currentLyrics.slice(0, playingWordIndex);
-            currentWordIndex = playingWordIndex;
-
-            // go back to playing-word
-            currentWord = document.querySelectorAll('.lyrics-word')[currentWordIndex];
-            lastWord = document.querySelectorAll('.lyrics-word')[currentWordIndex - 1];
-
-            // remove done-word class from all words after playing-word
-            const doneWords = document.querySelectorAll('.done-word');
-            doneWords.forEach(word => {
-                if(Array.from(document.querySelectorAll('.lyrics-word')).indexOf(word) > currentWordIndex) {
-                    word.classList.remove('done-word');
-                }
-            });
-
-            // remove current-word class from all words
-            const currentWords = document.querySelectorAll('.current-word');
-            currentWords.forEach(word => {
-                word.classList.remove('current-word');
-            });
-        }
+    // Skip words in tagged lines
+    while (currentWord && currentWord.isTaggedLine && currentWord.text !== "#ENDOFLINE") {
+        currentWordIndex++;
+        currentWord = tempLyrics[currentWordIndex];
+        lastWord = tempLyrics[currentWordIndex - 1];
     }
 
-    let isLastWord = 0;
-
-    if(currentWord.nextSibling === null) {
-        isLastWord = 1;
+    if (lastWord && lastWord.isTaggedLine && lastWordIndex != -1) {
+        lastWordIndex++;
+        lastWord = tempLyrics[lastWordIndex];
     }
 
-    let wordText = currentWord.innerHTML;
-    if(isLastWord) {
-        wordText = wordText.trim();
+    if (!currentWord) {
+        return; // Tidak ada kata selanjutnya
     }
 
-    // add current word to currentLyrics
-    currentLyrics.push({
-        time: parseInt(time.toFixed(0)),
-        duration: 0,
-        text: wordText,
-        isLineEnding: isLastWord,
-        element: currentWord
-    });
+    const pWordIndex = tempLyrics.findIndex(word => word.element.classList.contains('current-word'));
+    if (pWordIndex !== -1) tempLyrics[pWordIndex].element?.classList?.remove('current-word')
 
-    // get difference between time and lastWordTime
-    if(currentLyrics[currentLyrics.length - 2]) {
-        const lastWordTime = currentLyrics[currentLyrics.length - 2].time;
+    const playingWordIndex = tempLyrics.findIndex(word => word.element.classList.contains('playing-word'));
+
+    /*if (playingWordIndex !== -1 && playingWordIndex < currentWordIndex - 1) {
+        currentWordIndex = playingWordIndex;
+        const playingWord = tempLyrics[currentWordIndex];
+        playingWord.element.classList.add('current-word');
+        playingWord.element.classList.remove('done-word');
+        tempLyrics.forEach((word, index) => {
+            if (index > currentWordIndex - 1) {
+                word.element.classList.remove('done-word');
+                word.element.classList.remove('current-word');
+                word.time = 0;
+                word.duration = 0;
+            }
+        });
+    }*/
+
+    currentWord.time = time;
+    currentWord.isDone = true;
+    currentWord.duration = 0;
+    if (lastWord) {
+        const lastWordTime = lastWord.time;
         const difference = time - lastWordTime;
-        currentLyrics[currentLyrics.length - 2].duration = parseInt(difference.toFixed(0));
-        currentLyrics[currentLyrics.length - 2].element.style.setProperty('--duration', parseInt(difference.toFixed(0)) + 'ms');
+        lastWord.duration = difference;
+        lastWord.element.style.setProperty('--duration', difference + 'ms');
     }
 
-    // set current word to next word
-    currentWord.classList.add('current-word');
-    currentWord.id = 'word-' + (currentLyrics.length - 1).toString();
-
-    if(lastWord) {
-        lastWord.classList.add('done-word');
-        lastWord.classList.remove('current-word');
+    if (currentWord.element) {
+        currentWord.element.classList.add('current-word');
+        currentWord.element.id = 'word-' + currentWordIndex;
+        currentWord.element.classList.add('playing-word');
     }
 
-    currentWordIndex += 1;
+    if (lastWord && lastWord.element) {
+        lastWord.element.classList.add('done-word');
+        lastWord.element.classList.remove('current-word');
+    }
 
-    // scroll to next word
+    currentWordIndex++;
+
     const elem_lyricsContent = document.getElementById('lyrics-content');
-    elem_lyricsContent.scrollTop = currentWord.offsetTop - elem_lyricsContent.offsetTop - 100;
+    elem_lyricsContent.scrollTop = currentWord.element.offsetTop - elem_lyricsContent.offsetTop - 100;
 
-    // if there is no next word, remove class current-word from last word
-    if(!nextWord) {
+    if (currentWordIndex >= tempLyrics.length) {
         setTimeout(() => {
-            currentWord.classList.remove('current-word');
-            currentWord.classList.add('done-word');
+            currentWord.element.classList.remove('current-word');
+            currentWord.element.classList.add('done-word');
         }, 500);
     }
 }
 
 function openWord(wordIndex) {
-    const word = currentLyrics[wordIndex];
-    selectedWordIndex = wordIndex;
+    const word = tempLyrics[wordIndex];
+    currentWordIndex = wordIndex;
 
     document.querySelectorAll('.opened-word').forEach(word => {
         word.classList.remove('opened-word');
     });
 
-    word.element.classList.add('opened-word');
+    if (word.element) {
+        word.element.classList.add('opened-word');
+    }
+
     document.getElementById('properties-word').innerText = word.text;
     document.getElementById('properties-start').value = word.time;
     document.getElementById('properties-length').value = word.duration;
 
-    // go to word
+    // Pergi ke kata
     elem_musicPlayer.currentTime = word.time / 1000;
 }
+
+function isRTL(s){           
+    var ltrChars    = 'A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02B8\u0300-\u0590\u0800-\u1FFF'+'\u2C00-\uFB1C\uFDFE-\uFE6F\uFEFD-\uFFFF',
+        rtlChars    = '\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC',
+        rtlDirCheck = new RegExp('^[^'+ltrChars+']*['+rtlChars+']');
+
+    return rtlDirCheck.test(s);
+};
+
 
 // UI functions
 function playPause() {
@@ -377,7 +451,7 @@ function playPause() {
         playPauseButton.classList.remove('enabled');
     }, 50);
 
-    if(elem_musicPlayer.paused) {
+    if (elem_musicPlayer.paused) {
         elem_musicPlayer.play();
     } else {
         elem_musicPlayer.pause();
@@ -419,39 +493,25 @@ function unselect() {
 
 // exports
 function prepareJSON() {
-    let exportedLyrics = currentLyrics;
-
-    // add mussing lyrics with duration 0 and last time
-    const lastTime = currentLyrics[currentLyrics.length - 1].time;
-
-    const words = document.querySelectorAll('.lyrics-word');
-    words.forEach(word => {
-        const index = Array.from(document.querySelectorAll('.lyrics-word')).indexOf(word);
-        if(index >= currentLyrics.length) {
-            let isLineEnding = 0;
-            if(word.nextSibling === null) {
-                isLineEnding = 1;
-            }
-
-            let wordId = parseInt(word.id.split('-')[1]);
-            let wordLyr = currentLyrics[wordId];
-
-            exportedLyrics.push({
-                time: lastTime,
-                duration: 0,
-                text: wordLyr.text,
-                isLineEnding: isLineEnding,
-            });
-        }
-    });
-
-    // filter out empty words
-    const filteredLyrics = currentLyrics.filter(word => word.text !== '');
+    //Filter out empty words or items with isTaggedLine == true
+    let exportedLyrics = tempLyrics.filter(word => word.text.trim() !== '')
+        .filter(word => word.isTaggedLine !== true)
+        .map(item => ({
+            time: Math.round(item.time),
+            duration: Math.round(item.duration),
+            text: item.text,
+            isLineEnding: item.isLineEnding ? 1 : 0,
+            element: item.tempElement ? {
+                key: item.tempElement.key,
+                songPart: item.tempElement.songPart,
+                singer: item.tempElement.singer
+            } : {}
+        }));
 
     // make pretty JSON
-    const json = JSON.stringify(filteredLyrics, null, 4);
+    const json = JSON.stringify(exportedLyrics, null, 4);
 
-    const blob = new Blob([json], {type: 'application/json'});
+    const blob = new Blob([json], { type: 'application/json' });
     return blob;
 }
 
@@ -461,8 +521,8 @@ function prepareLRC() {
     let currentPhraseTime = '';
     let currentPhrase = '';
 
-    currentLyrics.forEach((word, index) => {
-        if (index === 0 || currentLyrics[index - 1].isLineEnding === 1) {
+    tempLyrics.forEach((word, index) => {
+        if (index === 0 || tempLyrics[index - 1].isLineEnding === 1) {
             if (currentPhrase !== '') {
                 lrcContent += '[' + currentPhraseTime + ']' + currentPhrase.trim() + '\n';
             }
@@ -483,8 +543,8 @@ function prepareLRC() {
 function prepareELRC() {
     let lrcContent = '';
 
-    currentLyrics.forEach((word, index) => {
-        if (index === 0 || currentLyrics[index - 1].isLineEnding === 1) {
+    tempLyrics.forEach((word, index) => {
+        if (index === 0 || tempLyrics[index - 1].isLineEnding === 1) {
             lrcContent += '\n' + '[' + msToTime(word.time) + ']' + word.text;
         }
         else {
@@ -531,7 +591,7 @@ function exportKMAKE() {
     let jsonLyrics = prepareJSON();
     zip.file("lyrics.kmakefile", jsonLyrics);
 
-    const options = { 
+    const options = {
         type: 'blob',
         mimeType: 'application/kmake',
     };
@@ -559,7 +619,7 @@ function importKMAKE() {
                     // get music
                     zip.file("audiofile.kmakefile").async("blob").then(function (content) {
                         const file = new File([content], 'audiofile.mp3');
-                        
+
                         // create filelist
                         const fileList = new DataTransfer();
                         fileList.items.add(file);
@@ -588,12 +648,12 @@ function importKMAKE() {
 }
 
 // shortcuts
-document.addEventListener('keydown', function(event) {
+document.addEventListener('keydown', function (event) {
     // check if we're in the lyrics input
-    if(document.activeElement === elem_lyricsInput) {
+    if (document.activeElement === elem_lyricsInput) {
         return;
     }
-    if(event.keyCode === 13) {
+    if (event.keyCode === 13) {
         // prevent default
         event.preventDefault();
 
@@ -603,35 +663,39 @@ document.addEventListener('keydown', function(event) {
 
 // playback
 setInterval(() => {
-    // TODO : opti
+    if (!tempLyrics || tempLyrics.length === 0) return; // Pastikan tempLyrics terisi
 
-    if(elem_musicPlayer.paused) {
+    // Pause detection
+    if (elem_musicPlayer.paused) {
         document.getElementById('lyrics-content').classList.add('paused');
-    }
-    else {
+    } else {
         document.getElementById('lyrics-content').classList.remove('paused');
     }
 
     const time = elem_musicPlayer.currentTime * 1000;
-    
-    // find the word next to the word that is currently playing
+
+    // Cari kata yang sedang diputar
     let currentWord = null;
-    for(let i = 0; i < currentLyrics.length; i++) {
-        const word = currentLyrics[i];
-        if(word.time > time) {
-            currentWord = currentLyrics[i-1];
+    for (let i = 0; i < tempLyrics.length; i++) {
+        const word = tempLyrics[i];
+        if (word.time > time) {
+            currentWord = tempLyrics[i - 1] || null;
             break;
         }
     }
 
-    if(document.querySelectorAll('.playing-word').length > 0) {
-        document.querySelector('.playing-word').classList.remove('playing-word');
+    // Hilangkan kelas "playing-word" dari kata sebelumnya
+    const playingWordElement = document.querySelector('.playing-word');
+    if (playingWordElement) {
+        playingWordElement.classList.remove('playing-word');
     }
 
-    if(currentWord) {
+    // Tambahkan kelas "playing-word" ke kata yang sedang diputar
+    if (currentWord && currentWord.element) {
         currentWord.element.classList.add('playing-word');
     }
 
+    // Pastikan tidak menggandakan tindakan jika kata tidak berubah
     if (currentWord && currentWord.text === played_word) {
         return;
     } else if (!currentWord) {
@@ -640,64 +704,70 @@ setInterval(() => {
         played_word = currentWord.text;
     }
 
-    if(!currentWord) {
-        return;
-    }
-
-    // add past-word class to all words before currentWord
+    // Tambahkan kelas "past-word" ke semua kata sebelum currentWord
     const allWords = Array.from(document.querySelectorAll('.lyrics-word'));
     const currentIndex = allWords.indexOf(currentWord.element);
-
     allWords.forEach((word, index) => {
         word.classList.toggle('past-word', index < currentIndex);
     });
 
+    // Perbarui status baris lirik, pastikan baris tidak kosong atau bertanda
     document.querySelectorAll('.lyrics-line').forEach(line => {
-        line.classList.remove('playing-line', 'next-playing-line');
+        line.classList.remove('playing-line', 'next-playing-line', 'previous-playing-line', 'next-next-playing-line');
+
+        // Abaikan baris yang bertanda atau kosong
+        if (line.classList.contains('tagged-line')) {
+            return;
+        }
     });
 
     const lyricsLine = currentWord.element.closest('.lyrics-line');
-    lyricsLine.classList.add('playing-line');
-    lyricsLine.classList.remove('next-playing-line');
-    
-    document.querySelectorAll('.next-next-playing-line').forEach(line => {
-        line.classList.remove('next-next-playing-line');
-    });
 
-    document.querySelectorAll('.previous-playing-line').forEach(line => {
-        line.classList.remove('previous-playing-line');
-    });
+    // Abaikan baris yang kosong atau memiliki class 'tagged-line'
+    if (lyricsLine && !lyricsLine.classList.contains('tagged-line')) {
+        lyricsLine.classList.add('playing-line');
 
-    const nextLyricsLine = lyricsLine.nextSibling;
-    if (nextLyricsLine !== null) {
-        nextLyricsLine.classList.add('next-playing-line');
-    }
+        // Tambahkan kelas ke baris berikutnya dan sebelumnya
+        let nextLyricsLine = lyricsLine.nextSibling;
+        let previousLyricsLine = lyricsLine.previousSibling;
 
-    const nextNextLyricsLine = nextLyricsLine.nextSibling;
-    if (nextNextLyricsLine !== null) {
-        nextNextLyricsLine.classList.add('next-next-playing-line');
-    }
+        while (nextLyricsLine && (nextLyricsLine.classList.contains('tagged-line'))) {
+            nextLyricsLine = nextLyricsLine.nextSibling;
+        }
 
-    // get previous line
-    const previousLyricsLine = lyricsLine.previousSibling;
-    if (previousLyricsLine !== null) {
-        previousLyricsLine.classList.add('previous-playing-line');
-    }
+        while (previousLyricsLine && (previousLyricsLine.classList.contains('tagged-line'))) {
+            previousLyricsLine = previousLyricsLine.previousSibling;
+        }
 
-    // if preview, scroll to current line
-    if (document.getElementById('lyrics-content').classList.contains('preview')) {
-        const lyricsContent = document.getElementById('lyrics-content');
-       
-        const currentLine = document.querySelector('.playing-line');
+        if (nextLyricsLine) {
+            nextLyricsLine.classList.add('next-playing-line');
+            let nextNextLyricsLine = nextLyricsLine.nextSibling;
 
-        const currentLineTop = currentLine.offsetTop;
-        
-        lyricsContent.scrollTop = currentLineTop - lyricsContent.clientHeight / 2 + 120;
+            while (nextNextLyricsLine && (nextNextLyricsLine.classList.contains('tagged-line'))) {
+                nextNextLyricsLine = nextNextLyricsLine.nextSibling;
+            }
+
+            if (nextNextLyricsLine) {
+                nextNextLyricsLine.classList.add('next-next-playing-line');
+            }
+        }
+
+        if (previousLyricsLine) {
+            previousLyricsLine.classList.add('previous-playing-line');
+        }
+
+        // Scroll ke baris yang sedang dimainkan jika dalam mode preview
+        if (document.getElementById('lyrics-content').classList.contains('preview')) {
+            const lyricsContent = document.getElementById('lyrics-content');
+            const currentLineTop = lyricsLine.offsetTop;
+
+            lyricsContent.scrollTop = currentLineTop - lyricsContent.clientHeight / 2 + 120;
+        }
     }
 }, 1);
 
 // events
-elem_musicInput.addEventListener('change', function() {
+elem_musicInput.addEventListener('change', function () {
     const file = this.files[0];
     const objectURL = URL.createObjectURL(file);
     elem_musicPlayer.src = objectURL;
@@ -708,7 +778,7 @@ elem_musicInput.addEventListener('change', function() {
     filename = file.name.split('.').slice(0, -1).join('.');
 
     jsmediatags.read(file, {
-        onSuccess: function(tag) {
+        onSuccess: function (tag) {
             document.getElementById('music-title').innerText = tag.tags.title || "Unknown Title";
             document.getElementById('music-artist').innerText = tag.tags.artist || "Unknown Artist";
             document.getElementById('music-album').innerText = tag.tags.album || "Unknown Album";
@@ -720,12 +790,12 @@ elem_musicInput.addEventListener('change', function() {
 
             document.getElementById('music-album-art').src = 'data:' + format + ';base64,' + base64String
         },
-        onError: function(error) {
+        onError: function (error) {
             console.error(error)
         }
-    })  
+    })
 
-    if(!importedJSON) {
+    if (!importedJSON) {
         currentLyrics = [];
         lastWordTime = 0;
         currentWordIndex = 0;
@@ -733,19 +803,19 @@ elem_musicInput.addEventListener('change', function() {
 });
 
 // on play, reset goBackIndex
-elem_musicPlayer.addEventListener('play', function() {
+elem_musicPlayer.addEventListener('play', function () {
     goBackIndex = 0;
 });
 
 // shortcut spacebar to play/pause
-document.addEventListener('keydown', function(event) {
+document.addEventListener('keydown', function (event) {
     // check if we're in the lyrics input
-    if(document.activeElement === elem_lyricsInput) {
+    if (document.activeElement === elem_lyricsInput) {
         return;
     }
-    if(event.keyCode === 32) {
+    if (event.keyCode === 32) {
         // if audioplayer is in focus, don't play/pause
-        if(document.activeElement === elem_musicPlayer) {
+        if (document.activeElement === elem_musicPlayer) {
             return;
         }
 
@@ -757,46 +827,46 @@ document.addEventListener('keydown', function(event) {
 });
 
 // on arrow left, go back to last word and on arrow right, go to next word
-document.addEventListener('keydown', function(event) {
-    if(event.keyCode === 37) {
+document.addEventListener('keydown', function (event) {
+    if (event.keyCode === 37) {
         goBackIndex -= 1;
     }
-    if(event.keyCode === 39) {
+    if (event.keyCode === 39) {
         goBackIndex += 1;
 
-        if(goBackIndex > 0) {
+        if (goBackIndex > 0) {
             goBackIndex = 0;
         }
     }
 
     // move to word
-    if(event.keyCode === 37 || event.keyCode === 39) {
+    if (event.keyCode === 37 || event.keyCode === 39) {
         let word = currentLyrics[currentWordIndex + goBackIndex];
         elem_musicPlayer.currentTime = word.time / 1000;
     }
 });
 
 // on click on .lyrics-word
-document.addEventListener('click', function(event) {
-    if(event.target.classList.contains('lyrics-word')) {
+document.addEventListener('click', function (event) {
+    if (event.target.classList.contains('lyrics-word')) {
         const word = event.target;
-        if(word.id) {
+        if (word.id) {
             const wordIndex = parseInt(word.id.split('-')[1]);
             openWord(wordIndex);
-            
+
         }
     }
 });
 
 // properties change
-document.getElementById('properties-start').addEventListener('change', function(event) {
+document.getElementById('properties-start').addEventListener('change', function (event) {
     if (selectedWordIndex === -1) {
         return;
     }
     currentLyrics[selectedWordIndex].time = parseInt(event.target.value);
 });
 
-document.getElementById('properties-length').addEventListener('change', function(event) {
+document.getElementById('properties-length').addEventListener('change', function (event) {
     if (selectedWordIndex === -1) {
         return;
     }
@@ -804,16 +874,16 @@ document.getElementById('properties-length').addEventListener('change', function
 
     // make sure that the next word starts after this word ends
     const nextWord = currentLyrics[selectedWordIndex + 1];
-    if(nextWord) {
-        if(nextWord.time < currentLyrics[selectedWordIndex].time + currentLyrics[selectedWordIndex].duration) {
+    if (nextWord) {
+        if (nextWord.time < currentLyrics[selectedWordIndex].time + currentLyrics[selectedWordIndex].duration) {
             nextWord.time = currentLyrics[selectedWordIndex].time + currentLyrics[selectedWordIndex].duration;
         }
     }
 
     // make sure that the previous word ends before this word starts
     const previousWord = currentLyrics[selectedWordIndex - 1];
-    if(previousWord) {
-        if(previousWord.time + previousWord.duration > currentLyrics[selectedWordIndex].time) {
+    if (previousWord) {
+        if (previousWord.time + previousWord.duration > currentLyrics[selectedWordIndex].time) {
             previousWord.duration = currentLyrics[selectedWordIndex].time - previousWord.time;
         }
     }
@@ -822,9 +892,9 @@ document.getElementById('properties-length').addEventListener('change', function
     currentLyrics[selectedWordIndex].element.style.setProperty('--duration', currentLyrics[selectedWordIndex].duration + 'ms');
 });
 
-document.getElementById('properties-preview').addEventListener('click', function(event) {
+document.getElementById('properties-preview').addEventListener('click', function (event) {
     const word = currentLyrics[selectedWordIndex];
-    elem_musicPlayer.currentTime = word.time / 1000;
+    elem_musicPlayer.currentTime = word ? word.time / 1000 : 0;
     elem_musicPlayer.play();
 
     // stop preview after duration
@@ -834,17 +904,68 @@ document.getElementById('properties-preview').addEventListener('click', function
 });
 
 // on dom fully loaded
-window.addEventListener('load', function() {
+window.addEventListener('load', function () {
     document.getElementById('loading').style.display = 'none';
 });
 
 // dropdown
-tippy('#export-drop', {
+tippy('#file-drop', {
     content: `
+        <div id="file-dropdown" class="dropdown-content">
+            <button onclick="reset()">New</button>
+            <button onclick="importKMAKE()">Open</button>
+            <button onclick="exportKMAKE()">Save as</button>
+        </div>
         <div id="export-dropdown" class="dropdown-content">
             <button onclick="exportJSON()" id="json-button">Export as JSON</button>
             <button onclick="exportLRC()" id="lrc-button">Export as LRC</button>
             <button onclick="exportELRC()" id="lrc-button">Export as eLRC</button>
+        </div>
+    `,
+    allowHTML: true,
+    trigger: 'click',
+    interactive: true,
+    animation: 'fade',
+    arrow: false,
+    theme: 'kmake-dropdown',
+    placement: 'bottom-start',
+});
+tippy('#about-drop', {
+    content: `
+        <div id="about-dropdown" class="dropdown-content">
+            <button>Kmake+</button>
+            <button>${AppVersion.customName}</button>
+            <button>V${AppVersion.version}</button>
+            <button onclick="window.open('https://github.com/ecnivtwelve/kmake')">Originally Created By ecnivtwelve</button>
+        </div>
+    `,
+    allowHTML: true,
+    trigger: 'click',
+    interactive: true,
+    animation: 'fade',
+    arrow: false,
+    theme: 'kmake-dropdown',
+    placement: 'bottom-start',
+});
+tippy('#preview-drop', {
+    content: `
+        <div id="preview-dropdown" class="dropdown-content">
+        <div class="properties-item">
+                            <p class="properties-title">Enable preview mode</p>
+                            <div class="properties-content">
+                                <input type="checkbox" id="preview-checkbox" onchange="previewToggle()"/>
+                            </div>
+                        </div>
+                        <div class="properties-item">
+                            <p class="properties-title">Preview theme</p>
+                            <div class="properties-content">
+                                <select id="preview-theme">
+                                    <option value="jd2014">jd2014</option>
+                                    <option value="spotify">spotify</option>
+                                    <option value="karafun">karafun</option>
+                                </select>
+                            </div>
+                        </div>
         </div>
     `,
     allowHTML: true,

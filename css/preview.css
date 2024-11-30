@@ -18,6 +18,10 @@
     --offset-y: 10px;
 }
 
+#lyrics-content.preview .lyrics-line.tagged-line .lyrics-word{
+    display: none;
+}
+
 #lyrics-content.preview .lyrics-word {
     color: #fff !important;
     border: none;

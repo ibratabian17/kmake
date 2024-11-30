@@ -38,6 +38,7 @@ body {
     height: env(titlebar-area-height, 36px);
     -webkit-app-region: drag;
     app-region: drag;
+    z-index: 99;
 }
 
 .header-content {
@@ -481,9 +482,28 @@ button.enabled {
 
     flex-wrap: wrap;
 }
+.lyrics-line.tagged-line {
+    margin: 0.1em;
+    background: #313131;
+    width: min-content;
+    padding: 0.1em 1em;
+    border-radius: 1em;
+    color: #5a08c5!important;
+    user-select: none;
+    pointer-events: none;
+}
+.tagged-line .lyrics-word {
+    background: none;
+    font-size: 0.4em;
+    color: #785dff;
+}
 
 .lyrics-word.lyrics-space {
     min-width: 50px !important;
+}
+
+.lyrics-line:has(.rtl-word){
+    flex-direction: row-reverse;
 }
 
 .lyrics-word.lyrics-space:after {
@@ -539,7 +559,7 @@ button.enabled {
     color: yellow !important;
 }
 
-.playing-word.opened-word {
+#lyrics-content:not([class="preview"]) .playing-word.opened-word {
     background: lime !important;
     color: #000 !important;
     text-shadow: none;
@@ -651,4 +671,5 @@ button.enabled {
 
 .tippy-box[data-theme~='kmake-dropdown'] .tippy-content {
     padding: 0;
+    width: min-content;
 }
