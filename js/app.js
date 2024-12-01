@@ -14,7 +14,7 @@ let played_word = ''; // word that is currently being played
 let music_file = null; // music file
 let isVisible = true;
 const AppVersion = {
-    version: '1.0.0',
+    version: '1.0.0-rev1',
     customName: 'Ibratabian17\'s Fork'
 }
 
@@ -157,6 +157,7 @@ function importJSON(files) {
                 span.innerText = lyric.text;
                 span.id = 'word-' + index;
                 if(isRTL(lyric.text))span.classList.add('rtl-word')
+                if (lyric.isDone)span.classList.add('done-word')
                 span.style.setProperty('--duration', lyric.duration + 'ms');
                 lyricsData[index].element = span
                 currentLine.appendChild(span);
@@ -188,21 +189,23 @@ function parseJsonToLyrics(jsonData) {
 
     jsonData.forEach((item, idx) => {
         const words = item.text;
+        const element = item.element || {}; // Safeguard for item.element being undefined
+        const songPart = element.songPart || null; // Safeguard for element.songPart being undefined
 
         // If the songPart changes, add a tagline
-        if (item.element.songPart !== previousSongPart) {
+        if (songPart && songPart !== previousSongPart) {
             // Add a tagged line for the songPart if it's different from the previous one
             const tagFormat = {
                 time: 0,
                 duration: 0,
-                text: "#" + item.element.songPart,
+                text: "#" + songPart,
                 isLineEnding: true,
                 isTaggedLine: true,
-                tag: item.element.songPart,
+                tag: songPart,
                 tempElement: {
                     key: `L${lineIndex}`,
-                    songPart: item.element.songPart,
-                    singer: item.element.singer
+                    songPart: songPart,
+                    singer: element.singer || null // Safeguard for element.singer
                 },
                 element: {},
                 offset: offset,
@@ -210,8 +213,9 @@ function parseJsonToLyrics(jsonData) {
                 wordIndex: offset
             };
             newLyrics.push(tagFormat); // Add the tag to the new lyrics
-            previousSongPart = item.element.songPart; // Update previous songPart to current one
+            previousSongPart = songPart; // Update previous songPart to current one
         }
+
         const wordData = {
             time: item.time, // Keep the time from the original JSON
             duration: item.duration, // Duration remains the same
@@ -221,24 +225,46 @@ function parseJsonToLyrics(jsonData) {
             tag: null, // No tag unless it's a tagged line
             tempElement: {
                 key: `L${lineIndex}`,
-                songPart: item.element.songPart,
-                singer: item.element.singer
+                songPart: songPart,
+                singer: element.singer || null // Safeguard for element.singer
             },
             element: {}, // Empty object as we're not using the DOM
             offset: offset,
             lineIndex: lineIndex,
-            wordIndex: offset
+            wordIndex: offset,
+            isDone: true
         };
 
         newLyrics.push(wordData); // Add the word data to the new lyrics
         if (item.isLineEnding == 1) lineIndex++;
         offset++; // Increment offset after adding each word
-
-        if (item.isLineEnding == 1) lineIndex++; // Increment lineIndex for the next set of lyrics
     });
+    // Add #ENDOFLINE tag
+    if (jsonData.length > 0) {
+        const lastItem = jsonData[jsonData.length - 1];
+        const endOfLineTag = {
+            time: lastItem.time + lastItem.duration, // Time of the last word + its duration
+            duration: 0,
+            text: "#ENDOFLINE",
+            isLineEnding: true,
+            isTaggedLine: true,
+            tag: "ENDOFLINE",
+            tempElement: {
+                key: `L${lineIndex}`,
+                songPart: null,
+                singer: null
+            },
+            element: {},
+            offset: offset,
+            lineIndex: lineIndex,
+            wordIndex: offset
+        };
+        newLyrics.push(endOfLineTag); // Add the end of line tag
+    }
 
     return newLyrics; // Return the final array of lyrics
 }
+
 
 function parseLyrics() {
     if (elem_lyricsInput.value.trim() === '') {
@@ -417,6 +443,7 @@ function nextWord() {
 function openWord(wordIndex) {
     const word = tempLyrics[wordIndex];
     currentWordIndex = wordIndex;
+    selectedWordIndex = wordIndex;
 
     document.querySelectorAll('.opened-word').forEach(word => {
         word.classList.remove('opened-word');
