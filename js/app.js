@@ -156,8 +156,11 @@ function importJSON(files) {
                 span.classList.add('lyrics-word');
                 span.innerText = lyric.text;
                 span.id = 'word-' + index;
-                if(isRTL(lyric.text))span.classList.add('rtl-word')
-                if (lyric.isDone)span.classList.add('done-word')
+                if (isRTL(lyric.text)) span.classList.add('rtl-word')
+                if (lyric.isDone) {
+                    span.classList.add('done-word')
+                    span.style.setProperty('--duration', lyric.duration + 'ms');
+                }
                 span.style.setProperty('--duration', lyric.duration + 'ms');
                 lyricsData[index].element = span
                 currentLine.appendChild(span);
@@ -303,7 +306,7 @@ function parseLyrics() {
             span.innerText = wordText + ' ';
 
             // Cari data sebelumnya di tempLyrics
-            let existingData = tempLyrics.find(tempItem => 
+            let existingData = tempLyrics.find(tempItem =>
                 tempItem.text.trim() === wordText.trim() &&
                 tempItem.lineIndex === lineIndex &&
                 tempItem.wordIndex === wordIndex
@@ -336,7 +339,8 @@ function parseLyrics() {
             }
 
             if (existingData.isDone) {
-                span.classList.add('done-word');
+                span.classList.add('done-word')
+                span.style.setProperty('--duration', lyric.duration + 'ms');
             }
 
             existingData.element = span;
@@ -461,10 +465,10 @@ function openWord(wordIndex) {
     elem_musicPlayer.currentTime = word.time / 1000;
 }
 
-function isRTL(s){           
-    var ltrChars    = 'A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02B8\u0300-\u0590\u0800-\u1FFF'+'\u2C00-\uFB1C\uFDFE-\uFE6F\uFEFD-\uFFFF',
-        rtlChars    = '\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC',
-        rtlDirCheck = new RegExp('^[^'+ltrChars+']*['+rtlChars+']');
+function isRTL(s) {
+    var ltrChars = 'A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02B8\u0300-\u0590\u0800-\u1FFF' + '\u2C00-\uFB1C\uFDFE-\uFE6F\uFEFD-\uFFFF',
+        rtlChars = '\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC',
+        rtlDirCheck = new RegExp('^[^' + ltrChars + ']*[' + rtlChars + ']');
 
     return rtlDirCheck.test(s);
 };
@@ -890,16 +894,16 @@ document.getElementById('properties-start').addEventListener('change', function 
     if (selectedWordIndex === -1) {
         return;
     }
-    currentLyrics[selectedWordIndex].time = parseInt(event.target.value);
+    tempLyrics[selectedWordIndex].time = parseInt(event.target.value);
 });
 
 document.getElementById('properties-length').addEventListener('change', function (event) {
     if (selectedWordIndex === -1) {
         return;
     }
-    currentLyrics[selectedWordIndex].duration = parseInt(event.target.value);
+    tempLyrics[selectedWordIndex].duration = parseInt(event.target.value);
 
-    // make sure that the next word starts after this word ends
+    /* make sure that the next word starts after this word ends
     const nextWord = currentLyrics[selectedWordIndex + 1];
     if (nextWord) {
         if (nextWord.time < currentLyrics[selectedWordIndex].time + currentLyrics[selectedWordIndex].duration) {
@@ -913,7 +917,7 @@ document.getElementById('properties-length').addEventListener('change', function
         if (previousWord.time + previousWord.duration > currentLyrics[selectedWordIndex].time) {
             previousWord.duration = currentLyrics[selectedWordIndex].time - previousWord.time;
         }
-    }
+    }*/
 
     // update duration of word in DOM
     currentLyrics[selectedWordIndex].element.style.setProperty('--duration', currentLyrics[selectedWordIndex].duration + 'ms');
