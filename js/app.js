@@ -446,23 +446,27 @@ function nextWord() {
 
 function openWord(wordIndex) {
     const word = tempLyrics[wordIndex];
+    if (!word) return;
+
     currentWordIndex = wordIndex;
     selectedWordIndex = wordIndex;
 
-    document.querySelectorAll('.opened-word').forEach(word => {
-        word.classList.remove('opened-word');
-    });
-
-    if (word.element) {
-        word.element.classList.add('opened-word');
-    }
+    document.querySelectorAll('.opened-word').forEach(el => el.classList.remove('opened-word'));
+    word.element?.classList.add('opened-word');
 
     document.getElementById('properties-word').innerText = word.text;
     document.getElementById('properties-start').value = word.time;
     document.getElementById('properties-length').value = word.duration;
-
-    // Pergi ke kata
+    
     elem_musicPlayer.currentTime = word.time / 1000;
+}
+function unselect() {
+    selectedWordIndex = -1;
+    document.querySelectorAll('.opened-word').forEach(el => el.classList.remove('opened-word'));
+
+    document.getElementById('properties-word').innerText = '';
+    document.getElementById('properties-start').value = 0;
+    document.getElementById('properties-length').value = 0;
 }
 
 function isRTL(s) {
@@ -510,17 +514,6 @@ document.getElementById('preview-theme').addEventListener('change', () => {
     // change data-theme of lyrics-content
     document.getElementById('lyrics-content').setAttribute('data-theme', document.getElementById('preview-theme').value);
 });
-
-function unselect() {
-    selectedWordIndex = -1;
-    document.querySelectorAll('.opened-word').forEach(word => {
-        word.classList.remove('opened-word');
-    });
-
-    document.getElementById('properties-word').innerText = '';
-    document.getElementById('properties-start').value = 0;
-    document.getElementById('properties-length').value = 0;
-}
 
 // exports
 function prepareJSON() {
@@ -941,11 +934,11 @@ document.getElementById('properties-length').addEventListener('change', function
     }*/
 
     // update duration of word in DOM
-    currentLyrics[selectedWordIndex].element.style.setProperty('--duration', currentLyrics[selectedWordIndex].duration + 'ms');
+    tempLyrics[selectedWordIndex].element.style.setProperty('--duration', tempLyrics[selectedWordIndex].duration + 'ms');
 });
 
 document.getElementById('properties-preview').addEventListener('click', function (event) {
-    const word = currentLyrics[selectedWordIndex];
+    const word = tempLyrics[selectedWordIndex];
     elem_musicPlayer.currentTime = word ? word.time / 1000 : 0;
     elem_musicPlayer.play();
 
