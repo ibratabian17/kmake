@@ -18,8 +18,9 @@
     --offset-y: 10px;
 }
 
-#lyrics-content.preview .lyrics-line.tagged-line .lyrics-word{
-    display: none;
+#lyrics-content.preview .lyrics-line.tagged-line .lyrics-word {
+    font-size: 40%;
+    color: #fff;
 }
 
 #lyrics-content.preview .lyrics-word {
@@ -333,4 +334,62 @@
 
 #lyrics-content.preview[data-theme="applemusic"] .playing-line .past-word, #lyrics-content.preview[data-theme="spotify"] .playing-line .playing-word {
     color: #fff !important;
+}
+
+/* Default Theme - Combination of JD2014, Spotify, and Karafun */
+#lyrics-content.preview[data-theme="default"] {
+    --offset-x: 10px;
+    --offset-y: 40%;
+    
+    background: linear-gradient(84deg, #662441, #432466, #244066);
+    background-size: 450% 540%;
+    animation: karaokeGradient 7s ease infinite;
+    
+    gap: 14px;
+    padding-left: 24px;
+    padding-right: 24px;
+    width: calc(100% - 48px);
+}
+
+@keyframes karaokeGradient {
+    0% { background-position: 72% 0%; }
+    50% { background-position: 29% 100%; }
+    100% { background-position: 72% 0%; }
+}
+
+#lyrics-content.preview[data-theme="default"] .lyrics-word {
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-size: 28px;
+    font-weight: 900;
+    color: #ffffff50 !important;
+}
+
+#lyrics-content.preview[data-theme="default"] .lyrics-line .past-word {
+    color: #ffffff50 !important;
+}
+
+#lyrics-content.preview[data-theme="default"] .playing-line .lyrics-word {
+    color: #ffffff50 !important;
+}
+
+#lyrics-content.preview[data-theme="default"] .playing-line .past-word{
+    color: #fff !important;
+}
+
+#lyrics-content.preview[data-theme="default"] .playing-word {
+    background: linear-gradient(90deg, rgb(255, 255, 255) 100%, #ffffff50 100%);
+    background-repeat: no-repeat;
+    background-clip: text !important;
+    -webkit-background-clip: text !important;
+    background-size: 0% 100%;
+    animation: def-word-playing var(--duration) linear forwards;
+}
+
+@keyframes def-word-playing {
+    0% { background-size: 0% 100%; }
+    100% { background-size: 100% 100%; }
+}
+
+#lyrics-content.preview[data-theme="default"].paused .playing-word {
+    animation-play-state: paused !important;
 }

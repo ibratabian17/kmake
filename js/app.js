@@ -694,7 +694,7 @@ document.addEventListener('keydown', function (event) {
 
 // playback
 setInterval(() => {
-    if (!tempLyrics || tempLyrics.length === 0) return; // Pastikan tempLyrics terisi
+    if (!tempLyrics || tempLyrics.length === 0) return;
 
     // Pause detection
     if (elem_musicPlayer.paused) {
@@ -705,28 +705,34 @@ setInterval(() => {
 
     const time = elem_musicPlayer.currentTime * 1000;
 
-    // Cari kata yang sedang diputar
+    // Find current word
     let currentWord = null;
     for (let i = 0; i < tempLyrics.length; i++) {
         const word = tempLyrics[i];
         if (word.time > time) {
-            currentWord = tempLyrics[i - 1] || null;
+            // Skip tagged lines when finding current word
+            let previousWord = tempLyrics[i - 1];
+            while (previousWord && previousWord.isTaggedLine) {
+                i--;
+                previousWord = tempLyrics[i - 1];
+            }
+            currentWord = previousWord || null;
             break;
         }
     }
 
-    // Hilangkan kelas "playing-word" dari kata sebelumnya
+    // Remove playing-word class from previous word
     const playingWordElement = document.querySelector('.playing-word');
     if (playingWordElement) {
         playingWordElement.classList.remove('playing-word');
     }
 
-    // Tambahkan kelas "playing-word" ke kata yang sedang diputar
+    // Add playing-word class to current word
     if (currentWord && currentWord.element) {
         currentWord.element.classList.add('playing-word');
     }
 
-    // Pastikan tidak menggandakan tindakan jika kata tidak berubah
+    // Check if word changed
     if (currentWord && currentWord.text === played_word) {
         return;
     } else if (!currentWord) {
@@ -735,65 +741,80 @@ setInterval(() => {
         played_word = currentWord.text;
     }
 
-    // Tambahkan kelas "past-word" ke semua kata sebelum currentWord
-    const allWords = Array.from(document.querySelectorAll('.lyrics-word'));
+    // Add past-word class to previous words (excluding tagged lines)
+    const allWords = Array.from(document.querySelectorAll('.lyrics-word')).filter(word => {
+        const wordIndex = parseInt(word.id.split('-')[1]);
+        return !tempLyrics[wordIndex]?.isTaggedLine;
+    });
     const currentIndex = allWords.indexOf(currentWord.element);
     allWords.forEach((word, index) => {
         word.classList.toggle('past-word', index < currentIndex);
     });
 
-    // Perbarui status baris lirik, pastikan baris tidak kosong atau bertanda
-    document.querySelectorAll('.lyrics-line').forEach(line => {
+    // Clear previous line classes
+    document.querySelectorAll('.lyrics-line:not(.tagged-line)').forEach(line => {
         line.classList.remove('playing-line', 'next-playing-line', 'previous-playing-line', 'next-next-playing-line');
-
-        // Abaikan baris yang bertanda atau kosong
-        if (line.classList.contains('tagged-line')) {
-            return;
-        }
     });
 
     const lyricsLine = currentWord.element.closest('.lyrics-line');
+    if (!lyricsLine || lyricsLine.classList.contains('tagged-line')) {
+        const nearestLine = findNearestNonTaggedLine(currentWord.element);
+        if (!nearestLine) return;
+        lyricsLine = nearestLine;
+    }
 
-    // Abaikan baris yang kosong atau memiliki class 'tagged-line'
-    if (lyricsLine && !lyricsLine.classList.contains('tagged-line')) {
-        lyricsLine.classList.add('playing-line');
-
-        // Tambahkan kelas ke baris berikutnya dan sebelumnya
-        let nextLyricsLine = lyricsLine.nextSibling;
-        let previousLyricsLine = lyricsLine.previousSibling;
-
-        while (nextLyricsLine && (nextLyricsLine.classList.contains('tagged-line'))) {
-            nextLyricsLine = nextLyricsLine.nextSibling;
-        }
-
-        while (previousLyricsLine && (previousLyricsLine.classList.contains('tagged-line'))) {
-            previousLyricsLine = previousLyricsLine.previousSibling;
-        }
-
-        if (nextLyricsLine) {
-            nextLyricsLine.classList.add('next-playing-line');
-            let nextNextLyricsLine = nextLyricsLine.nextSibling;
-
-            while (nextNextLyricsLine && (nextNextLyricsLine.classList.contains('tagged-line'))) {
-                nextNextLyricsLine = nextNextLyricsLine.nextSibling;
+    // Function to find nearest non-tagged line
+    function findNearestNonTaggedLine(element) {
+        let current = element;
+        while (current) {
+            const line = current.closest('.lyrics-line');
+            if (line && !line.classList.contains('tagged-line')) {
+                return line;
             }
+            current = current.nextElementSibling || current.parentElement.nextElementSibling;
+        }
+        return null;
+    }
 
-            if (nextNextLyricsLine) {
-                nextNextLyricsLine.classList.add('next-next-playing-line');
+    // Function to get valid line (skipping tagged lines)
+    function getValidLine(element, direction) {
+        let currentElement = element;
+        while (currentElement) {
+            currentElement = direction === 'next' ? 
+                currentElement.nextElementSibling : 
+                currentElement.previousElementSibling;
+                
+            if (currentElement && !currentElement.classList.contains('tagged-line')) {
+                return currentElement;
             }
         }
+        return null;
+    }
 
-        if (previousLyricsLine) {
-            previousLyricsLine.classList.add('previous-playing-line');
+    // Add playing-line class
+    lyricsLine.classList.add('playing-line');
+
+    // Handle next lines
+    const nextLine = getValidLine(lyricsLine, 'next');
+    if (nextLine) {
+        nextLine.classList.add('next-playing-line');
+        const nextNextLine = getValidLine(nextLine, 'next');
+        if (nextNextLine) {
+            nextNextLine.classList.add('next-next-playing-line');
         }
+    }
 
-        // Scroll ke baris yang sedang dimainkan jika dalam mode preview
-        if (document.getElementById('lyrics-content').classList.contains('preview')) {
-            const lyricsContent = document.getElementById('lyrics-content');
-            const currentLineTop = lyricsLine.offsetTop;
+    // Handle previous line
+    const previousLine = getValidLine(lyricsLine, 'previous');
+    if (previousLine) {
+        previousLine.classList.add('previous-playing-line');
+    }
 
-            lyricsContent.scrollTop = currentLineTop - lyricsContent.clientHeight / 2 + 120;
-        }
+    // Auto-scroll in preview mode
+    if (document.getElementById('lyrics-content').classList.contains('preview')) {
+        const lyricsContent = document.getElementById('lyrics-content');
+        const currentLineTop = lyricsLine.offsetTop;
+        lyricsContent.scrollTop = currentLineTop - lyricsContent.clientHeight / 2 + 120;
     }
 }, 1);
 
@@ -991,6 +1012,7 @@ tippy('#preview-drop', {
                             <p class="properties-title">Preview theme</p>
                             <div class="properties-content">
                                 <select id="preview-theme">
+                                    <option value="default">Default</option>
                                     <option value="jd2014">jd2014</option>
                                     <option value="spotify">spotify</option>
                                     <option value="karafun">karafun</option>
