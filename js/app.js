@@ -13,8 +13,12 @@ let selectedWordIndex = -1; // index of the selected word
 let played_word = ''; // word that is currently being played
 let music_file = null; // music file
 let isVisible = true;
+let metadata = {
+    songWriters: [],
+    curator: "Kmake"
+}
 const AppVersion = {
-    version: '1.0.0-rev1',
+    version: '1.31-Kmake+',
     customName: 'Ibratabian17\'s Fork'
 }
 
@@ -130,45 +134,45 @@ function importJSON(files) {
         const reader = new FileReader();
         reader.readAsText(file, 'UTF-8');
         reader.onload = function (evt) {
-            const json = parseJsonToLyrics(JSON.parse(evt.target.result));
-            const lyricsData = Array.isArray(json) ? json : json.lyrics || [];
+            const jsonData = JSON.parse(evt.target.result);
+            const checkedData = Array.isArray(jsonData) ? jsonData : jsonData.lyrics && Array.isArray(jsonData.lyrics) ? jsonData.lyrics : [];
+            const lyricsData = parseJsonToLyrics(checkedData);
+            const plainText = jsonData.plainText || "";
 
             // Clear the current lyrics content
-            elem_lyricsContent.innerHTML = '';
+            elem_lyricsContent.innerText = '';
+            elem_lyricsInput.value = plainText;
 
-            let currentLine = null; // Store the current line as an array
-            let isNewLine = true; // Flag to check if we need to start a new line
+            let currentLine = null;
+            let isNewLine = true;
 
-            // Iterate through the provided lyrics array
             lyricsData.forEach((lyric, index) => {
                 if (isNewLine) {
                     currentLine = document.createElement('p');
                     currentLine.classList.add('lyrics-line');
-                    // Add class for even or odd lines
                     currentLine.classList.add(lyric.lineIndex % 2 === 0 ? 'even' : 'odd');
                     if (lyric.isTaggedLine) {
                         currentLine.classList.add('tagged-line');
                     }
-                    isNewLine = false; // We are adding words to a new line
+                    isNewLine = false;
                 }
 
                 const span = document.createElement('span');
                 span.classList.add('lyrics-word');
                 span.innerText = lyric.text;
                 span.id = 'word-' + index;
-                if (isRTL(lyric.text)) span.classList.add('rtl-word')
+                if (isRTL(lyric.text)) span.classList.add('rtl-word');
                 if (lyric.isDone) {
-                    span.classList.add('done-word')
+                    span.classList.add('done-word');
                     span.style.setProperty('--duration', lyric.duration + 'ms');
                 }
                 span.style.setProperty('--duration', lyric.duration + 'ms');
-                lyricsData[index].element = span
+                lyricsData[index].element = span;
                 currentLine.appendChild(span);
 
-                // If it's the end of the line, append the currentLine and reset the flag
                 if (lyric.isLineEnding) {
                     elem_lyricsContent.appendChild(currentLine);
-                    isNewLine = true; // Prepare for the next line
+                    isNewLine = true;
                 }
             });
 
@@ -340,7 +344,6 @@ function parseLyrics() {
 
             if (existingData.isDone) {
                 span.classList.add('done-word')
-                span.style.setProperty('--duration', lyric.duration + 'ms');
             }
 
             existingData.element = span;
@@ -457,7 +460,7 @@ function openWord(wordIndex) {
     document.getElementById('properties-word').innerText = word.text;
     document.getElementById('properties-start').value = word.time;
     document.getElementById('properties-length').value = word.duration;
-    
+
     elem_musicPlayer.currentTime = word.time / 1000;
 }
 function unselect() {
@@ -516,10 +519,9 @@ document.getElementById('preview-theme').addEventListener('change', () => {
 });
 
 // exports
-function prepareJSON() {
-    //Filter out empty words or items with isTaggedLine == true
-    let exportedLyrics = tempLyrics.filter(word => word.text.trim() !== '')
-        .filter(word => word.isTaggedLine !== true)
+function prepareJSON(CleanTiming = true) {
+    let exportedLyrics = tempLyrics.filter(word => CleanTiming && word.text.trim() !== '')
+        .filter(word => CleanTiming && word.isTaggedLine !== true)
         .map(item => ({
             time: Math.round(item.time),
             duration: Math.round(item.duration),
@@ -532,12 +534,22 @@ function prepareJSON() {
             } : {}
         }));
 
-    // make pretty JSON
-    const json = JSON.stringify(exportedLyrics, null, 4);
+    const plainText = elem_lyricsInput.value !== "" ? elem_lyricsInput.value : undefined;
 
+    const formattedJSON = {
+        type: "Word",
+        KpoeTools: AppVersion.version,
+        metadata: metadata,
+        lyrics: exportedLyrics,
+        plainText: plainText,
+        isNotRaw: CleanTiming
+    };
+
+    const json = JSON.stringify(formattedJSON, null, 4);
     const blob = new Blob([json], { type: 'application/json' });
     return blob;
 }
+
 
 function prepareLRC() {
     let lrcContent = '';
@@ -612,7 +624,7 @@ function exportKMAKE() {
     zip.file("audiofile.kmakefile", music_file);
 
     // add lyrics
-    let jsonLyrics = prepareJSON();
+    let jsonLyrics = prepareJSON(false);
     zip.file("lyrics.kmakefile", jsonLyrics);
 
     const options = {
@@ -773,10 +785,10 @@ setInterval(() => {
     function getValidLine(element, direction) {
         let currentElement = element;
         while (currentElement) {
-            currentElement = direction === 'next' ? 
-                currentElement.nextElementSibling : 
+            currentElement = direction === 'next' ?
+                currentElement.nextElementSibling :
                 currentElement.previousElementSibling;
-                
+
             if (currentElement && !currentElement.classList.contains('tagged-line')) {
                 return currentElement;
             }
