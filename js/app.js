@@ -830,8 +830,12 @@ elem_musicInput.addEventListener('change', function () {
     elem_musicPlayer.src = objectURL;
 
     music_file = file;
+    document.getElementById('music-title').innerText = "Unknown Title";
+    document.getElementById('music-artist').innerText = "Unknown Artist";
+    document.getElementById('music-album').innerText = "Unknown Album";
+    document.getElementById('music-album-art').src = ''; // Clear the image or set a default
 
-    // remove extension from filename
+    // Remove extension from filename
     filename = file.name.split('.').slice(0, -1).join('.');
 
     jsmediatags.read(file, {
@@ -840,17 +844,27 @@ elem_musicInput.addEventListener('change', function () {
             document.getElementById('music-artist').innerText = tag.tags.artist || "Unknown Artist";
             document.getElementById('music-album').innerText = tag.tags.album || "Unknown Album";
 
-            // Array buffer to base64
-            const data = tag.tags.picture.data
-            const format = tag.tags.picture.format
-            const base64String = btoa(String.fromCharCode.apply(null, data))
+            // Check if album art exists
+            if (tag.tags.picture) {
+                const data = tag.tags.picture.data;
+                const format = tag.tags.picture.format;
+                const base64String = btoa(String.fromCharCode.apply(null, data));
+                document.getElementById('music-album-art').src = `data:${format};base64,${base64String}`;
+            } else {
+                document.getElementById('music-album-art').src = ''; // Clear the image or set a default
+            }
 
-            document.getElementById('music-album-art').src = 'data:' + format + ';base64,' + base64String
+            // Attempt to get songwriters if available
+            if (tag.tags["TXXX"] && tag.tags["TXXX"].description === "Writer") {
+                metadata.songWriters = tag.tags["TXXX"].split(',')
+            } else {
+                metadata.songWriters = []
+            }
         },
         onError: function (error) {
-            console.error(error)
+            console.error(error);
         }
-    })
+    });
 
     if (!importedJSON) {
         currentLyrics = [];
@@ -858,6 +872,7 @@ elem_musicInput.addEventListener('change', function () {
         currentWordIndex = 0;
     }
 });
+
 
 // on play, reset goBackIndex
 elem_musicPlayer.addEventListener('play', function () {
