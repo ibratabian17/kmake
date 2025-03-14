@@ -520,22 +520,32 @@ document.getElementById('preview-theme').addEventListener('change', () => {
 
 // exports
 function prepareJSON(CleanTiming = true) {
-    let exportedLyrics = tempLyrics.filter(word => CleanTiming && word.text.trim() !== '')
-        .filter(word => CleanTiming && word.isTaggedLine !== true)
-        .map(item => ({
-            time: Math.round(item.time),
-            duration: Math.round(item.duration),
-            text: item.text,
-            isLineEnding: item.isLineEnding ? 1 : 0,
-            element: item.tempElement ? {
-                key: item.tempElement.key,
-                songPart: item.tempElement.songPart,
-                singer: item.tempElement.singer
-            } : {}
-        }));
+    // Apply filtering conditionally based on CleanTiming
+    let exportedLyrics = tempLyrics;
+    
+    if (CleanTiming) {
+        exportedLyrics = tempLyrics
+            .filter(word => word.text.trim() !== '')
+            .filter(word => !word.isTaggedLine);
+    }
+    
+    // Map the filtered lyrics to the desired format
+    exportedLyrics = exportedLyrics.map(item => ({
+        time: Math.round(item.time),
+        duration: Math.round(item.duration),
+        text: item.text,
+        isLineEnding: item.isLineEnding ? 1 : 0,
+        element: item.tempElement ? {
+            key: item.tempElement.key,
+            songPart: item.tempElement.songPart,
+            singer: item.tempElement.singer
+        } : {}
+    }));
 
+    // Get plainText if available
     const plainText = elem_lyricsInput.value !== "" ? elem_lyricsInput.value : undefined;
 
+    // Create the JSON object
     const formattedJSON = {
         type: "Word",
         KpoeTools: AppVersion.version,
@@ -545,6 +555,7 @@ function prepareJSON(CleanTiming = true) {
         isNotRaw: CleanTiming
     };
 
+    // Convert to JSON string and create blob
     const json = JSON.stringify(formattedJSON, null, 4);
     const blob = new Blob([json], { type: 'application/json' });
     return blob;
