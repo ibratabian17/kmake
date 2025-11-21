@@ -147,7 +147,7 @@ function isValidTag(text) {
 }
 
 function extractTagName(text) {
-    return text.trim().substring(1).toUpperCase()
+    return text.trim().substring(1)
 }
 
 // functional functions
@@ -346,6 +346,10 @@ function parseJsonToLyrics(jsonData) {
     return newLyrics
 }
 
+function cleanText(text) {
+    return (text || '').replace(/[\]\-\s]/g, '').toLowerCase()
+}
+
 function parseLyrics() {
     if (elem_lyricsInput.value.trim() === '') {
         return
@@ -355,17 +359,18 @@ function parseLyrics() {
 
     const newLyrics = []
     const lines = `${elem_lyricsInput.value}\n#ENDOFLINE`.split('\n')
-    let offset = 0
     let currentTag = ""
 
+    let totalOffset = 0
+    
     lines.forEach((line, lineIndex) => {
         const p = document.createElement('p')
         p.classList.add('lyrics-line')
         p.classList.add(lineIndex % 2 === 0 ? 'even' : 'odd')
 
         let isTaggedLine = false
-
         const trimmedLine = line.trim()
+        
         if (isValidTag(trimmedLine)) {
             isTaggedLine = true
             currentTag = extractTagName(trimmedLine)
@@ -373,68 +378,94 @@ function parseLyrics() {
         }
 
         const words = isTaggedLine ? [trimmedLine] : splitTextWithSeparators(line)
-        
+
         words.forEach((word, wordIndex) => {
             const span = document.createElement('span')
-            const wordText = word
-            const displayText = wordText.replace(/\]/g, '')
-
+            const displayText = word.replace(/\]/g, '')
+            
             span.classList.add('lyrics-word')
             span.innerText = displayText
+            
+            if (displayText.trim() === '') span.classList.add('lyrics-space')
+            if (isRTL(displayText)) span.classList.add('rtl-word')
+            span.id = 'word-' + totalOffset
 
-            let existingData = tempLyrics[offset]
-
-            if (!existingData || existingData.offset !== offset) {
-                existingData = {
-                    time: 0,
-                    duration: 0,
-                    text: wordText,
-                    displayText: displayText,
-                    isLineEnding: wordIndex === words.length - 1,
-                    isTaggedLine: isTaggedLine,
-                    tag: isTaggedLine ? currentTag : null,
-                    tempElement: { 
-                        key: `L${lineIndex}`, 
-                        songPart: currentTag, 
-                        singer: 'v1' 
-                    },
-                    element: null,
-                    offset,
-                    lineIndex,
-                    wordIndex
-                }
-            } else {
-                existingData.text = wordText
-                existingData.displayText = displayText
-                existingData.isLineEnding = wordIndex === words.length - 1
-                existingData.isTaggedLine = isTaggedLine
-                existingData.tag = isTaggedLine ? currentTag : null
-                existingData.lineIndex = lineIndex
-                existingData.wordIndex = wordIndex
+            const wordData = {
+                time: 0,
+                duration: 0,
+                text: word,
+                displayText: displayText,
+                isLineEnding: wordIndex === words.length - 1,
+                isTaggedLine: isTaggedLine,
+                tag: isTaggedLine ? currentTag : null,
+                tempElement: {
+                    key: `L${lineIndex}`,
+                    songPart: currentTag,
+                    singer: 'v1'
+                },
+                element: span,
+                offset: totalOffset,
+                lineIndex: lineIndex,
+                wordIndex: wordIndex,
+                isDone: false
             }
-
-            if (displayText.trim() === '') {
-                span.classList.add('lyrics-space')
-            }
-            if (isRTL(displayText)) {
-                span.classList.add('rtl-word')
-            }
-
-            if (existingData.isDone) {
-                span.classList.add('done-word')
-                span.style.setProperty('--duration', (existingData.duration || 0) + 'ms')
-            }
-
-            existingData.element = span
-            span.id = 'word-' + offset
 
             p.appendChild(span)
-            newLyrics.push(existingData)
-            offset++
+            newLyrics.push(wordData)
+            totalOffset++
         })
-
         elem_lyricsContent.appendChild(p)
     })
+
+    let oldCursor = 0
+
+    for (let i = 0; i < newLyrics.length; i++) {
+        let newWord = newLyrics[i]
+        let matchedOldData = null
+
+        const searchLimit = 10
+
+        for (let k = 0; k < searchLimit; k++) {
+            let checkIndex = oldCursor + k
+            if (checkIndex >= tempLyrics.length) break
+
+            let oldWord = tempLyrics[checkIndex]
+
+            if (newWord.isTaggedLine !== oldWord.isTaggedLine) continue
+
+            const nTxt = cleanText(newWord.text)
+            const oTxt = cleanText(oldWord.text)
+
+            if (nTxt === oTxt) {
+                matchedOldData = oldWord
+                oldCursor = checkIndex + 1
+                break
+            }
+
+            if (oTxt.startsWith(nTxt) && nTxt.length > 0) {
+                matchedOldData = oldWord
+                oldCursor = checkIndex + 1
+                break
+            }
+
+            if (nTxt.startsWith(oTxt) && oTxt.length > 0) {
+                matchedOldData = oldWord
+                oldCursor = checkIndex + 1
+                break
+            }
+        }
+
+        if (matchedOldData) {
+            newWord.time = matchedOldData.time || 0
+            newWord.duration = matchedOldData.duration || 0
+            newWord.isDone = matchedOldData.isDone || false
+
+            if (newWord.isDone && newWord.element) {
+                newWord.element.classList.add('done-word')
+                newWord.element.style.setProperty('--duration', newWord.duration + 'ms')
+            }
+        }
+    }
 
     tempLyrics = newLyrics
 }
