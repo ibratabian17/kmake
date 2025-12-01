@@ -908,3 +908,8 @@ button.enabled:hover {
     /* Let content dictate width */
     border-radius: var(--md-sys-shape-corner-extra-small);
 }
+
+.plyr iframe, .plyr__video-wrapper {
+    display: none;
+    /* Force disable video, cuz this lyrics editor, not a videoplayer */
+}

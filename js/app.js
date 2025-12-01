@@ -37,6 +37,13 @@ const player = new Plyr(elem_musicPlayer, {
     speed: {
         selected: 1,
         options: [0.5, 0.75, 1, 1.5]
+    },
+    youtube: {
+        noCookie: true, 
+        rel: 0, 
+        showinfo: 0, 
+        iv_load_policy: 3, 
+        modestbranding: 1
     }
 })
 
@@ -162,7 +169,8 @@ function reset() {
     selectedWordIndex = -1
     played_word = ''
 
-    elem_musicPlayer.src = ''
+    player.source = { type: 'audio', sources: [] };
+    
     elem_musicInput.value = ''
     elem_lyricsInput.value = ''
     elem_lyricsContent.innerHTML = ''
@@ -179,6 +187,58 @@ function importSong() {
     elem_musicInput.click()
     elem_navbar.setAttribute('visible', 'false')
     isVisible = false
+}
+
+function importYoutube() {
+    const url = prompt("Enter YouTube URL:");
+    if (!url) return;
+
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+
+    if (match && match[2].length === 11) {
+        const videoId = match[2];
+        filename = `youtube-${videoId}`;
+
+        player.source = {
+            type: 'audio',
+            sources: [
+                {
+                    src: videoId,
+                    provider: 'youtube',
+                },
+            ],
+        };
+
+        fetch(`https://noembed.com/embed?url=${url}`)
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('music-title').innerText = data.title || "YouTube Video";
+                document.getElementById('music-artist').innerText = data.author_name || "YouTube";
+                document.getElementById('music-album').innerText = "YouTube";
+                if(data.thumbnail_url) {
+                    document.getElementById('music-album-art').src = data.thumbnail_url;
+                }
+            })
+            .catch(err => {
+                console.error("Could not fetch YouTube metadata", err);
+                document.getElementById('music-title').innerText = "YouTube Video";
+            });
+
+        if (!importedJSON) {
+            currentLyrics = [];
+            currentWordIndex = 0;
+        }
+
+        const plyCont= document.querySelector('.music-inner .plyr')
+        plyCont.classList.remove('plyr--video')
+        plyCont.classList.add('plyr--audio')
+        
+        elem_navbar.setAttribute('visible', 'false');
+        isVisible = false;
+    } else {
+        alert("Invalid YouTube URL");
+    }
 }
 
 function importJSON(files) {
@@ -479,7 +539,7 @@ function nextWord() {
         }, 50)
     }
 
-    const time = elem_musicPlayer.currentTime * 1000
+    const time = player.currentTime * 1000
     let currentWord = tempLyrics[currentWordIndex]
     let lastWord = tempLyrics[currentWordIndex - 1]
     lastWordIndex = currentWordIndex - 1
@@ -562,7 +622,7 @@ function openWord(wordIndex) {
     document.getElementById('properties-start').value = word.time || 0
     document.getElementById('properties-length').value = word.duration || 0
 
-    elem_musicPlayer.currentTime = (word.time || 0) / 1000
+    player.currentTime = (word.time || 0) / 1000
 }
 
 function unselect() {
@@ -594,10 +654,10 @@ function playPause() {
         }, 50)
     }
 
-    if (elem_musicPlayer.paused) {
-        elem_musicPlayer.play()
+    if (player.paused) {
+        player.play()
     } else {
-        elem_musicPlayer.pause()
+        player.pause()
     }
 }
 
@@ -830,13 +890,13 @@ document.addEventListener('keydown', function (event) {
 setInterval(() => {
     if (!tempLyrics || tempLyrics.length === 0) return
 
-    if (elem_musicPlayer.paused) {
+    if (player.paused) {
         document.getElementById('lyrics-content').classList.add('paused')
     } else {
         document.getElementById('lyrics-content').classList.remove('paused')
     }
 
-    const time = elem_musicPlayer.currentTime * 1000
+    const time = player.currentTime * 1000
 
     let currentWord = null
     for (let i = 0; i < tempLyrics.length; i++) {
@@ -934,7 +994,17 @@ elem_musicInput.addEventListener('change', function () {
     if (!file) return
 
     const objectURL = URL.createObjectURL(file)
-    elem_musicPlayer.src = objectURL
+    
+    player.source = {
+        type: 'audio',
+        title: 'Local File',
+        sources: [
+            {
+                src: objectURL,
+                type: file.type || 'audio/mp3', 
+            },
+        ],
+    };
 
     music_file = file
     document.getElementById('music-title').innerText = "Unknown Title"
@@ -976,7 +1046,7 @@ elem_musicInput.addEventListener('change', function () {
     }
 })
 
-elem_musicPlayer.addEventListener('play', function () {
+player.on('play', function () {
     goBackIndex = 0
 })
 
@@ -985,7 +1055,7 @@ document.addEventListener('keydown', function (event) {
         return
     }
     if (event.keyCode === 32) {
-        if (document.activeElement === elem_musicPlayer) {
+        if (document.activeElement.tagName === 'BUTTON' || document.activeElement === elem_musicPlayer) {
             return
         }
 
@@ -1015,7 +1085,7 @@ document.addEventListener('keydown', function (event) {
         if (targetIndex >= 0 && targetIndex < tempLyrics.length) {
             let word = tempLyrics[targetIndex]
             if (word && word.time !== undefined) {
-                elem_musicPlayer.currentTime = word.time / 1000
+                player.currentTime = word.time / 1000
             }
         }
     }
@@ -1061,12 +1131,12 @@ document.getElementById('properties-preview')?.addEventListener('click', functio
     const word = tempLyrics[selectedWordIndex]
     if (!word) return
 
-    elem_musicPlayer.currentTime = (word.time || 0) / 1000
-    elem_musicPlayer.play()
+    player.currentTime = (word.time || 0) / 1000
+    player.play()
 
     const duration = word.duration || 1000
     setTimeout(() => {
-        elem_musicPlayer.pause()
+        player.pause()
     }, duration)
 })
 
