@@ -151,13 +151,15 @@ body {
     border: none;
     outline: none;
     color: var(--md-sys-color-on-surface-variant);
+    border-radius: 0px;
     font-size: var(--md-sys-typescale-label-large-font-size);
     font-weight: var(--md-sys-typescale-label-large-font-weight);
-    padding: 8px 12px;
-    border-radius: var(--md-sys-shape-corner-full);
-    height: 32px;
+    padding: 12px 12px;
+    /* border-radius: var(--md-sys-shape-corner-full); */
+    /* height: 32px; */
     -webkit-app-region: no-drag !important;
     app-region: no-drag !important;
+    /* padding: 1em; */
     cursor: pointer;
     transition: background-color 0.2s ease;
 }
