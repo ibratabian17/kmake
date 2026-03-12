@@ -1,10 +1,9 @@
-// imports
 const jsmediatags = window.jsmediatags
 
-// global variables
 let currentLyrics = []
-let tempLyrics = []
-let currentWordIndex = 0
+let tempLyrics = []         // array of line objects including tagged (section/agent) entries
+let allSyllables = []       // flat cursor array: [{ lineIdx, syllabusIdx }], tagged lines excluded
+let currentWordIndex = 0    // current position in allSyllables
 let lastWordIndex = 0
 let goBackIndex = 0
 let importedJSON = false
@@ -14,15 +13,20 @@ let played_word = ''
 let music_file = null
 let isVisible = true
 let metadata = {
+    source: "",
+    title: "",
+    language: "",
     songWriters: [],
+    agents: { "v1": { type: "person", name: "", alias: "v1" } },
+    songParts: [],
+    totalDuration: "",
     curator: "Kmake"
 }
 const AppVersion = {
-    version: '1.32-Kmake+',
+    version: '2.0-kmakeEditor',
     customName: 'Ibratabian17\'s Fork'
 }
 
-// dom elements
 const elem_part_sortable = document.getElementsByClassName('part-sortable')
 const elem_musicInput = document.getElementById('music-input')
 const elem_musicPlayer = document.getElementById('music-player')
@@ -31,7 +35,6 @@ const elem_lyricsContent = document.getElementById('lyrics-content')
 const elem_navbar = document.getElementById('navbar')
 const elem_showMenu = document.querySelector('.show-more')
 
-// plyr
 const player = new Plyr(elem_musicPlayer, {
     controls: ['play', 'progress', 'current-time', 'mute', 'settings'],
     speed: {
@@ -39,10 +42,10 @@ const player = new Plyr(elem_musicPlayer, {
         options: [0.5, 0.75, 1, 1.5]
     },
     youtube: {
-        noCookie: true, 
-        rel: 0, 
-        showinfo: 0, 
-        iv_load_policy: 3, 
+        noCookie: true,
+        rel: 0,
+        showinfo: 0,
+        iv_load_policy: 3,
         modestbranding: 1
     }
 })
@@ -57,7 +60,6 @@ elem_showMenu.onclick = function () {
     }
 }
 
-// sortable
 for (let i = 0; i < elem_part_sortable.length; i++) {
     Sortable.create(elem_part_sortable[i], {
         group: "part-sortable",
@@ -80,7 +82,6 @@ for (let i = 0; i < elem_part_sortable.length; i++) {
     })
 }
 
-// tools
 function msToTime(duration) {
     let milliseconds = parseInt((duration % 1000) / 10)
     let seconds = parseInt((duration / 1000) % 60)
@@ -157,10 +158,23 @@ function extractTagName(text) {
     return text.trim().substring(1)
 }
 
-// functional functions
+function extractAgentDeclaration(text) {
+    const regex = /^\[agent:(person|group|other|virtual)=([^:]+)(?::(.*))?\]$/i;
+    const match = text.trim().match(regex);
+    if (match) {
+        return {
+            type: match[1].toLowerCase(),
+            alias: match[2],
+            name: match[3] || ''
+        };
+    }
+    return null;
+}
+
 function reset() {
     currentLyrics = []
     tempLyrics = []
+    allSyllables = []
     currentWordIndex = 0
     lastWordIndex = 0
     goBackIndex = 0
@@ -169,8 +183,19 @@ function reset() {
     selectedWordIndex = -1
     played_word = ''
 
-    player.source = { type: 'audio', sources: [] };
-    
+    metadata = {
+        source: "",
+        title: "",
+        language: "",
+        songWriters: [],
+        agents: { "v1": { type: "person", name: "", alias: "v1" } },
+        songParts: [],
+        totalDuration: "",
+        curator: "Kmake"
+    }
+
+    player.source = { type: 'audio', sources: [] }
+
     elem_musicInput.value = ''
     elem_lyricsInput.value = ''
     elem_lyricsContent.innerHTML = ''
@@ -179,6 +204,22 @@ function reset() {
     document.getElementById('music-artist').innerText = ''
     document.getElementById('music-album').innerText = ''
     document.getElementById('music-album-art').src = ''
+}
+
+// Rebuilds flat allSyllables cursor from tempLyrics. Must be called after any tempLyrics change.
+function buildAllSyllables() {
+    allSyllables = []
+    for (let li = 0; li < tempLyrics.length; li++) {
+        const line = tempLyrics[li]
+        if (!line || line.isTaggedLine) continue
+        const syllabus = line.syllabus || []
+        for (let si = 0; si < syllabus.length; si++) {
+            allSyllables.push({ lineIdx: li, syllabusIdx: si })
+        }
+    }
+    // Virtual ENDOFLINE entry — lets the user press Enter one more time
+    // after the last real syllable to set its duration
+    allSyllables.push({ lineIdx: -1, syllabusIdx: -1, isEndOfLine: true })
 }
 
 function importSong() {
@@ -216,7 +257,7 @@ function importYoutube() {
                 document.getElementById('music-title').innerText = data.title || "YouTube Video";
                 document.getElementById('music-artist').innerText = data.author_name || "YouTube";
                 document.getElementById('music-album').innerText = "YouTube";
-                if(data.thumbnail_url) {
+                if (data.thumbnail_url) {
                     document.getElementById('music-album-art').src = data.thumbnail_url;
                 }
             })
@@ -230,10 +271,10 @@ function importYoutube() {
             currentWordIndex = 0;
         }
 
-        const plyCont= document.querySelector('.music-inner .plyr')
+        const plyCont = document.querySelector('.music-inner .plyr')
         plyCont.classList.remove('plyr--video')
         plyCont.classList.add('plyr--audio')
-        
+
         elem_navbar.setAttribute('visible', 'false');
         isVisible = false;
     } else {
@@ -261,48 +302,15 @@ function importJSON(files) {
         reader.onload = function (evt) {
             try {
                 const jsonData = JSON.parse(evt.target.result)
-                const checkedData = Array.isArray(jsonData) ? jsonData : jsonData.lyrics && Array.isArray(jsonData.lyrics) ? jsonData.lyrics : []
-                const lyricsData = parseJsonToLyrics(checkedData)
-                const plainText = jsonData.plainText || ""
+                const fmt = detectKpoeFormat(jsonData)
 
                 elem_lyricsContent.innerHTML = ''
-                elem_lyricsInput.value = plainText
 
-                let currentLine = null
-                let isNewLine = true
-
-                lyricsData.forEach((lyric, index) => {
-                    if (isNewLine) {
-                        currentLine = document.createElement('p')
-                        currentLine.classList.add('lyrics-line')
-                        currentLine.classList.add(lyric.lineIndex % 2 === 0 ? 'even' : 'odd')
-                        if (lyric.isTaggedLine) {
-                            currentLine.classList.add('tagged-line')
-                        }
-                        isNewLine = false
-                    }
-
-                    const span = document.createElement('span')
-                    span.classList.add('lyrics-word')
-                    span.innerText = lyric.text.replace(']', '')
-                    span.id = 'word-' + index
-                    if (isRTL(lyric.text)) span.classList.add('rtl-word')
-                    if (lyric.isDone) {
-                        span.classList.add('done-word')
-                        span.style.setProperty('--duration', lyric.duration + 'ms')
-                    }
-                    span.style.setProperty('--duration', lyric.duration + 'ms')
-                    lyricsData[index].element = span
-                    currentLine.appendChild(span)
-
-                    if (lyric.isLineEnding) {
-                        elem_lyricsContent.appendChild(currentLine)
-                        isNewLine = true
-                    }
-                })
-
-                tempLyrics = lyricsData
-                currentWordIndex = tempLyrics.length > 0 ? tempLyrics.length - 1 : 0
+                if (fmt === 'v2') {
+                    parseNewKpoeFormat(jsonData)
+                } else {
+                    parseLegacyToV2(jsonData)
+                }
             } catch (error) {
                 console.error('Error parsing JSON:', error)
                 alert('Error parsing JSON file. Please check the file format.')
@@ -320,90 +328,262 @@ function importJSON(files) {
     }
 }
 
-function parseJsonToLyrics(jsonData) {
-    if (!Array.isArray(jsonData)) return []
+function detectKpoeFormat(jsonData) {
+    const lyrics = jsonData.lyrics
+    if (Array.isArray(lyrics) && lyrics.length > 0 && Array.isArray(lyrics[0].syllabus)) {
+        return 'v2'
+    }
+    return 'v1'
+}
 
+function parseNewKpoeFormat(jsonData) {
+    const meta = jsonData.metadata || {}
+    metadata.source = meta.source || ''
+    metadata.title = meta.title || ''
+    metadata.language = meta.language || ''
+    metadata.songWriters = meta.songWriters || []
+    metadata.agents = meta.agents || { v1: { type: 'person', name: '', alias: 'v1' } }
+    metadata.songParts = meta.songParts || []
+    metadata.totalDuration = meta.totalDuration || ''
+
+    const lyricsArr = jsonData.lyrics || []
     const newLyrics = []
-    let previousSongPart = null
-    let offset = 0
     let lineIndex = 0
+    let prevPartIdx = -1
+    let plainText = ''
 
-    jsonData.forEach((item, idx) => {
-        if (!item || typeof item !== 'object') return
+    for (const alias in metadata.agents) {
+        const agent = metadata.agents[alias]
+        plainText += agent.name
+            ? `[agent:${agent.type}=${alias}:${agent.name}]\n`
+            : `[agent:${agent.type}=${alias}]\n`
+    }
+    if (Object.keys(metadata.agents).length > 0) plainText += '\n'
 
-        const words = item.text || ''
-        const element = item.element || {}
-        const songPart = element.songPart || null
+    lyricsArr.forEach((item) => {
+        if (!item) return
+        const el = item.element || {}
+        const partIdx = el.songPartIndex != null ? el.songPartIndex : -1
 
-        if (songPart && songPart !== previousSongPart) {
-            const tagFormat = {
-                time: 0,
-                duration: 0,
-                text: "#" + songPart,
-                isLineEnding: true,
+        if (partIdx !== prevPartIdx && partIdx >= 0 && metadata.songParts[partIdx]) {
+            const partName = metadata.songParts[partIdx].name
+            plainText += '#' + partName + '\n'
+            newLyrics.push({
+                time: 0, duration: 0,
+                text: '#' + partName,
+                syllabus: [],
+                element: { key: 'tag-' + partIdx, singer: null, songPartIndex: partIdx },
                 isTaggedLine: true,
-                tag: songPart,
-                tempElement: {
-                    key: `L${lineIndex}`,
-                    songPart: songPart,
-                    singer: element.singer || null
-                },
-                element: {},
-                offset: offset,
+                tag: partName,
                 lineIndex: lineIndex,
-                wordIndex: offset
-            }
-            newLyrics.push(tagFormat)
-            previousSongPart = songPart
+                lineElement: null
+            })
+            prevPartIdx = partIdx
+            lineIndex++
         }
 
-        const wordData = {
+        const rawSyllabus = item.syllabus || []
+        const syllabus = rawSyllabus.map(s => ({
+            time: s.time || 0,
+            duration: s.duration || 0,
+            text: s.text || '',
+            isDone: (s.time || 0) > 0,
+            element: null
+        }))
+
+        newLyrics.push({
             time: item.time || 0,
             duration: item.duration || 0,
-            text: words,
-            isLineEnding: item.isLineEnding == 1,
-            isTaggedLine: false,
-            tag: null,
-            tempElement: {
-                key: `L${lineIndex}`,
-                songPart: songPart,
-                singer: element.singer || null
+            text: item.text || '',
+            syllabus: syllabus,
+            element: {
+                key: el.key || ('L' + lineIndex),
+                singer: el.singer || 'v1',
+                songPartIndex: partIdx
             },
-            element: {},
-            offset: offset,
-            lineIndex: lineIndex,
-            wordIndex: offset,
-            isDone: true
-        }
-
-        newLyrics.push(wordData)
-        if (item.isLineEnding == 1) lineIndex++
-        offset++
+            isTaggedLine: false, tag: null,
+            lineIndex: lineIndex, lineElement: null
+        })
+        const singer = el.singer || 'v1'
+        plainText += `${singer}:${item.text || ''}\n`
+        lineIndex++
     })
 
-    if (jsonData.length > 0) {
-        const lastItem = jsonData[jsonData.length - 1]
-        const endOfLineTag = {
-            time: (lastItem.time || 0) + (lastItem.duration || 0),
-            duration: 0,
-            text: "#ENDOFLINE",
-            isLineEnding: true,
-            isTaggedLine: true,
-            tag: "ENDOFLINE",
-            tempElement: {
-                key: `L${lineIndex}`,
-                songPart: null,
-                singer: null
-            },
-            element: {},
-            offset: offset,
-            lineIndex: lineIndex,
-            wordIndex: offset
-        }
-        newLyrics.push(endOfLineTag)
-    }
+    tempLyrics = newLyrics
+    elem_lyricsInput.value = plainText.trim()
+    rebuildLyricsDOM()
+    buildAllSyllables()
+    _seekToFirstUnsynced()
+}
 
-    return newLyrics
+function parseLegacyToV2(jsonData) {
+    const raw = Array.isArray(jsonData) ? jsonData : (jsonData.lyrics || [])
+    const plainText = jsonData.plainText || ''
+
+    const lineGroups = []
+    let currentGroup = []
+    raw.forEach((item) => {
+        if (!item) return
+        currentGroup.push(item)
+        if (item.isLineEnding == 1) {
+            lineGroups.push(currentGroup)
+            currentGroup = []
+        }
+    })
+    if (currentGroup.length) lineGroups.push(currentGroup)
+
+    // Each contiguous run of the same songPart name gets its own songParts entry (duplicates allowed)
+    metadata.songParts = []
+    let prevSpName = null
+    lineGroups.forEach(group => {
+        const spName = group[0]?.element?.songPart || null
+        if (spName && spName !== prevSpName) {
+            metadata.songParts.push({ name: spName, time: 0, duration: 0 })
+        }
+        prevSpName = spName
+    })
+
+    // Map each group to its songPartIndex by re-walking in order
+    const groupPartIndices = []
+    let partCursor = -1
+    prevSpName = null
+    lineGroups.forEach(group => {
+        const spName = group[0]?.element?.songPart || null
+        if (spName && spName !== prevSpName) {
+            partCursor++
+            prevSpName = spName
+        }
+        groupPartIndices.push(spName ? partCursor : -1)
+    })
+
+    const newLyrics = []
+    let lineIndex = 0
+    let prevPartIdx = -1
+    let rebuiltPlainText = ''
+
+    for (const alias in metadata.agents) {
+        const agent = metadata.agents[alias]
+        rebuiltPlainText += agent.name
+            ? `[agent:${agent.type}=${alias}:${agent.name}]\n`
+            : `[agent:${agent.type}=${alias}]\n`
+    }
+    if (Object.keys(metadata.agents).length > 0) rebuiltPlainText += '\n'
+
+    lineGroups.forEach((group, gi) => {
+        if (!group.length) return
+        const spName = group[0]?.element?.songPart || null
+        const partIdx = groupPartIndices[gi]
+
+        if (partIdx !== prevPartIdx && partIdx >= 0) {
+            rebuiltPlainText += '#' + spName + '\n'
+            newLyrics.push({
+                time: 0, duration: 0,
+                text: '#' + spName,
+                syllabus: [],
+                element: { key: 'tag-' + partIdx, singer: null, songPartIndex: partIdx },
+                isTaggedLine: true, tag: spName,
+                lineIndex: lineIndex, lineElement: null
+            })
+            prevPartIdx = partIdx
+            lineIndex++
+        }
+
+        const syllabus = group.map(w => ({
+            time: w.time || 0,
+            duration: w.duration || 0,
+            text: (w.displayText || w.text || '').replace(/]/g, ''),
+            isDone: (w.time || 0) > 0,
+            element: null
+        }))
+
+        const firstItem = group[0]
+        const lastItem = group[group.length - 1]
+        const lineText = syllabus.map(s => s.text).join('')
+
+        newLyrics.push({
+            time: firstItem.time || 0,
+            duration: (lastItem.time || 0) + (lastItem.duration || 0) - (firstItem.time || 0),
+            text: lineText,
+            syllabus: syllabus,
+            element: {
+                key: firstItem.element?.key || ('L' + lineIndex),
+                singer: firstItem.element?.singer || 'v1',
+                songPartIndex: partIdx
+            },
+            isTaggedLine: false, tag: null,
+            lineIndex: lineIndex, lineElement: null
+        })
+        const singer = firstItem.element?.singer || 'v1'
+        rebuiltPlainText += `${singer}:${lineText}\n`
+        lineIndex++
+    })
+
+    tempLyrics = newLyrics
+    elem_lyricsInput.value = (plainText || rebuiltPlainText).trim()
+    rebuildLyricsDOM()
+    buildAllSyllables()
+    _seekToFirstUnsynced()
+}
+
+function parseJsonToLyrics(jsonData) {
+    const wrapper = Array.isArray(jsonData) ? { lyrics: jsonData } : jsonData
+    parseLegacyToV2(wrapper)
+    return tempLyrics
+}
+
+function rebuildLyricsDOM() {
+    elem_lyricsContent.innerHTML = ''
+    let lineDisplayIdx = 0
+
+    tempLyrics.forEach((line, li) => {
+        const p = document.createElement('p')
+        p.classList.add('lyrics-line')
+
+        if (line.isTaggedLine) {
+            p.classList.add('tagged-line')
+            p.classList.add(lineDisplayIdx % 2 === 0 ? 'even' : 'odd')
+            const span = document.createElement('span')
+            span.classList.add('lyrics-word')
+            span.innerText = line.text
+            span.id = 'line-' + li
+            p.appendChild(span)
+            elem_lyricsContent.appendChild(p)
+            line.lineElement = p
+            return
+        }
+
+        p.classList.add(lineDisplayIdx % 2 === 0 ? 'even' : 'odd')
+        line.lineElement = p
+
+            ; (line.syllabus || []).forEach((syl, si) => {
+                const span = document.createElement('span')
+                span.classList.add('lyrics-word')
+                span.innerText = syl.text
+                span.id = 'syl-' + li + '-' + si
+                if (isRTL(syl.text)) span.classList.add('rtl-word')
+                if (syl.isDone) {
+                    span.classList.add('done-word')
+                    span.style.setProperty('--duration', syl.duration + 'ms')
+                }
+                syl.element = span
+                p.appendChild(span)
+            })
+
+        elem_lyricsContent.appendChild(p)
+        lineDisplayIdx++
+    })
+}
+
+function _seekToFirstUnsynced() {
+    currentWordIndex = allSyllables.length // default: all done
+    for (let i = 0; i < allSyllables.length; i++) {
+        const entry = allSyllables[i]
+        if (entry.isEndOfLine) continue
+        if (!tempLyrics[entry.lineIdx].syllabus[entry.syllabusIdx].isDone) {
+            currentWordIndex = i
+            break
+        }
+    }
 }
 
 function cleanText(text) {
@@ -411,224 +591,254 @@ function cleanText(text) {
 }
 
 function parseLyrics() {
-    if (elem_lyricsInput.value.trim() === '') {
-        return
-    }
+    if (elem_lyricsInput.value.trim() === '') return
 
     elem_lyricsContent.innerHTML = ''
 
-    const newLyrics = []
-    const lines = `${elem_lyricsInput.value}\n#ENDOFLINE`.split('\n')
-    let currentTag = ""
-
-    let totalOffset = 0
-    
-    lines.forEach((line, lineIndex) => {
-        const p = document.createElement('p')
-        p.classList.add('lyrics-line')
-        p.classList.add(lineIndex % 2 === 0 ? 'even' : 'odd')
-
-        let isTaggedLine = false
-        const trimmedLine = line.trim()
-        
-        if (isValidTag(trimmedLine)) {
-            isTaggedLine = true
-            currentTag = extractTagName(trimmedLine)
-            p.classList.add('tagged-line')
+    // Per-key array so duplicate lines each restore their own timing in order
+    const oldLineMap = new Map()
+    tempLyrics.forEach(oldLine => {
+        if (!oldLine.isTaggedLine) {
+            const key = cleanText(oldLine.text)
+            if (!oldLineMap.has(key)) oldLineMap.set(key, [])
+            oldLineMap.get(key).push(oldLine)
         }
-
-        const words = isTaggedLine ? [trimmedLine] : splitTextWithSeparators(line)
-
-        words.forEach((word, wordIndex) => {
-            const span = document.createElement('span')
-            const displayText = word.replace(/\]/g, '')
-            
-            span.classList.add('lyrics-word')
-            span.innerText = displayText
-            
-            if (displayText.trim() === '') span.classList.add('lyrics-space')
-            if (isRTL(displayText)) span.classList.add('rtl-word')
-            span.id = 'word-' + totalOffset
-
-            const wordData = {
-                time: 0,
-                duration: 0,
-                text: word,
-                displayText: displayText,
-                isLineEnding: wordIndex === words.length - 1,
-                isTaggedLine: isTaggedLine,
-                tag: isTaggedLine ? currentTag : null,
-                tempElement: {
-                    key: `L${lineIndex}`,
-                    songPart: currentTag,
-                    singer: 'v1'
-                },
-                element: span,
-                offset: totalOffset,
-                lineIndex: lineIndex,
-                wordIndex: wordIndex,
-                isDone: false
-            }
-
-            p.appendChild(span)
-            newLyrics.push(wordData)
-            totalOffset++
-        })
-        elem_lyricsContent.appendChild(p)
     })
+    const oldLineConsumed = new Map()
 
-    let oldCursor = 0
-
-    for (let i = 0; i < newLyrics.length; i++) {
-        let newWord = newLyrics[i]
-        let matchedOldData = null
-
-        const searchLimit = 10
-
-        for (let k = 0; k < searchLimit; k++) {
-            let checkIndex = oldCursor + k
-            if (checkIndex >= tempLyrics.length) break
-
-            let oldWord = tempLyrics[checkIndex]
-
-            if (newWord.isTaggedLine !== oldWord.isTaggedLine) continue
-
-            const nTxt = cleanText(newWord.text)
-            const oTxt = cleanText(oldWord.text)
-
-            if (nTxt === oTxt) {
-                matchedOldData = oldWord
-                oldCursor = checkIndex + 1
-                break
-            }
-
-            if (oTxt.startsWith(nTxt) && nTxt.length > 0) {
-                matchedOldData = oldWord
-                oldCursor = checkIndex + 1
-                break
-            }
-
-            if (nTxt.startsWith(oTxt) && oTxt.length > 0) {
-                matchedOldData = oldWord
-                oldCursor = checkIndex + 1
-                break
-            }
-        }
-
-        if (matchedOldData) {
-            newWord.time = matchedOldData.time || 0
-            newWord.duration = matchedOldData.duration || 0
-            newWord.isDone = matchedOldData.isDone || false
-
-            if (newWord.isDone && newWord.element) {
-                newWord.element.classList.add('done-word')
-                newWord.element.style.setProperty('--duration', newWord.duration + 'ms')
-            }
-        }
+    metadata.songParts = []
+    // Each #Tag occurrence gets its own songParts entry — duplicates are intentional (grouping, not type)
+    function addSongPart(tagName) {
+        const idx = metadata.songParts.length
+        metadata.songParts.push({ name: tagName, time: 0, duration: 0 })
+        return idx
     }
 
+    const newLyrics = []
+    const lines = (elem_lyricsInput.value + '\n#ENDOFLINE').split('\n')
+    let lineDisplayIdx = 0
+    let currentTag = ''
+    let currentSongPartIndex = -1
+
+    lines.forEach((line, lineIndex) => {
+        const trimmed = line.trim()
+        const isSongPartTag = isValidTag(trimmed)
+        const agentDecl = extractAgentDeclaration(trimmed)
+
+        const p = document.createElement('p')
+        p.classList.add('lyrics-line')
+        p.classList.add(lineDisplayIdx % 2 === 0 ? 'even' : 'odd')
+
+        if (agentDecl) {
+            metadata.agents[agentDecl.alias] = {
+                type: agentDecl.type,
+                name: agentDecl.name,
+                alias: agentDecl.alias
+            }
+
+            p.classList.add('tagged-line')
+            const span = document.createElement('span')
+            span.classList.add('lyrics-word')
+            span.innerText = trimmed
+            span.id = 'line-tag-' + lineIndex
+            p.appendChild(span)
+            newLyrics.push({
+                time: 0, duration: 0, text: trimmed, syllabus: [],
+                element: { key: 'tag-' + lineIndex, singer: null, songPartIndex: currentSongPartIndex },
+                isTaggedLine: true, tag: null, lineIndex: lineIndex, lineElement: p
+            })
+            elem_lyricsContent.appendChild(p)
+            return
+        }
+
+        if (isSongPartTag) {
+            currentTag = extractTagName(trimmed)
+            if (currentTag !== 'ENDOFLINE') {
+                currentSongPartIndex = addSongPart(currentTag)
+            }
+            p.classList.add('tagged-line')
+            const span = document.createElement('span')
+            span.classList.add('lyrics-word')
+            span.innerText = trimmed
+            span.id = 'line-tag-' + lineIndex
+            p.appendChild(span)
+            newLyrics.push({
+                time: 0, duration: 0, text: trimmed, syllabus: [],
+                element: { key: 'tag-' + lineIndex, singer: null, songPartIndex: currentSongPartIndex },
+                isTaggedLine: true, tag: currentTag, lineIndex: lineIndex, lineElement: p
+            })
+            elem_lyricsContent.appendChild(p)
+            return
+        }
+
+        let lineSinger = 'v1'
+        let actualLineText = line
+
+        const sortedAliases = Object.keys(metadata.agents).sort((a, b) => b.length - a.length)
+        for (const alias of sortedAliases) {
+            if (actualLineText.trim().startsWith(alias + ':')) {
+                lineSinger = alias
+                const prefixMatch = actualLineText.match(new RegExp(`^\\s*${alias}:`))
+                if (prefixMatch) {
+                    actualLineText = actualLineText.substring(prefixMatch[0].length)
+                }
+                break
+            }
+        }
+
+        const words = splitTextWithSeparators(actualLineText)
+        const syllabus = words.map(w => ({ time: 0, duration: 0, text: w, isDone: false, element: null }))
+
+        // Consume old timing in order so duplicate lines don't steal each other's timing
+        const _key = cleanText(actualLineText)
+        const _pool = oldLineMap.get(_key)
+        const _consumed = oldLineConsumed.get(_key) || 0
+        const oldLine = _pool ? _pool[_consumed] : null
+        if (_pool && _consumed < _pool.length) oldLineConsumed.set(_key, _consumed + 1)
+        if (oldLine && oldLine.syllabus) {
+            oldLine.syllabus.forEach((oldSyl, si) => {
+                if (si < syllabus.length && oldSyl.isDone) {
+                    syllabus[si].time = oldSyl.time
+                    syllabus[si].duration = oldSyl.duration
+                    syllabus[si].isDone = oldSyl.isDone
+                }
+            })
+        }
+
+        const lineText = words.join('')
+        const lineTime = syllabus.find(s => s.isDone)?.time || 0
+        const lastSyl = [...syllabus].reverse().find(s => s.isDone)
+        const lineDur = lastSyl ? (lastSyl.time + lastSyl.duration - lineTime) : 0
+
+        syllabus.forEach((syl, si) => {
+            const span = document.createElement('span')
+            span.classList.add('lyrics-word')
+            span.innerText = syl.text.replace(/]/g, '')
+            span.id = 'syl-' + lineIndex + '-' + si
+            if (syl.text.trim() === '') span.classList.add('lyrics-space')
+            if (isRTL(syl.text)) span.classList.add('rtl-word')
+            if (syl.isDone) {
+                span.classList.add('done-word')
+                span.style.setProperty('--duration', syl.duration + 'ms')
+            }
+            syl.element = span
+            p.appendChild(span)
+        })
+
+        newLyrics.push({
+            time: lineTime, duration: lineDur, text: lineText, syllabus: syllabus,
+            element: { key: 'L' + lineIndex, singer: lineSinger, songPartIndex: currentSongPartIndex },
+            isTaggedLine: false, tag: null, lineIndex: lineIndex, lineElement: p
+        })
+        elem_lyricsContent.appendChild(p)
+        lineDisplayIdx++
+    })
+
     tempLyrics = newLyrics
+    buildAllSyllables()
+    _seekToFirstUnsynced()
 }
 
 function nextWord() {
     const NextWordButton = document.getElementById('nextword-button')
     if (NextWordButton) {
         NextWordButton.classList.add('enabled')
-        setTimeout(() => {
-            NextWordButton.classList.remove('enabled')
-        }, 50)
+        setTimeout(() => { NextWordButton.classList.remove('enabled') }, 50)
     }
+
+    if (allSyllables.length === 0 || currentWordIndex >= allSyllables.length) return
 
     const time = player.currentTime * 1000
-    let currentWord = tempLyrics[currentWordIndex]
-    let lastWord = tempLyrics[currentWordIndex - 1]
-    lastWordIndex = currentWordIndex - 1
+    const entry = allSyllables[currentWordIndex]
 
-    while (currentWord && currentWord.isTaggedLine && currentWord.text !== "#ENDOFLINE") {
+    // Virtual ENDOFLINE entry — seals the last syllable's duration then exits
+    if (entry.isEndOfLine) {
+        if (currentWordIndex > 0) {
+            const prev = allSyllables[currentWordIndex - 1]
+            const prevSyl = tempLyrics[prev.lineIdx]?.syllabus[prev.syllabusIdx]
+            if (prevSyl && prevSyl.time > 0) {
+                prevSyl.duration = Math.max(0, time - prevSyl.time)
+                if (prevSyl.element) {
+                    prevSyl.element.style.setProperty('--duration', prevSyl.duration + 'ms')
+                    prevSyl.element.classList.add('done-word')
+                    prevSyl.element.classList.remove('current-word')
+                }
+                const prevLine = tempLyrics[prev.lineIdx]
+                if (prevLine) {
+                    const lastLineSyl = prevLine.syllabus[prevLine.syllabus.length - 1]
+                    prevLine.duration = (lastLineSyl.time + lastLineSyl.duration) - prevLine.time
+                }
+            }
+        }
         currentWordIndex++
-        currentWord = tempLyrics[currentWordIndex]
-        lastWord = tempLyrics[currentWordIndex - 1]
-    }
-
-    if (lastWord && lastWord.isTaggedLine && lastWordIndex !== -1) {
-        lastWordIndex++
-        lastWord = tempLyrics[lastWordIndex]
-    }
-
-    if (!currentWord) {
         return
     }
 
-    const pWordIndex = tempLyrics.findIndex(word => word.element && word.element.classList.contains('current-word'))
-    if (pWordIndex !== -1 && tempLyrics[pWordIndex].element) {
-        tempLyrics[pWordIndex].element.classList.remove('current-word')
-    }
+    const { lineIdx, syllabusIdx } = entry
+    const line = tempLyrics[lineIdx]
+    if (!line) return
+    const syl = line.syllabus[syllabusIdx]
+    if (!syl) return
 
-    currentWord.time = time
-    currentWord.isDone = true
-    currentWord.duration = 0
-
-    if (lastWord && lastWordIndex >= 0) {
-        const lastWordTime = lastWord.time || 0
-        const difference = time - lastWordTime
-        lastWord.duration = Math.max(0, difference)
-        if (lastWord.element) {
-            lastWord.element.style.setProperty('--duration', lastWord.duration + 'ms')
+    if (currentWordIndex > 0) {
+        const prev = allSyllables[currentWordIndex - 1]
+        if (!prev.isEndOfLine) {
+            const prevSyl = tempLyrics[prev.lineIdx]?.syllabus[prev.syllabusIdx]
+            if (prevSyl && prevSyl.time > 0) {
+                prevSyl.duration = Math.max(0, time - prevSyl.time)
+                if (prevSyl.element) {
+                    prevSyl.element.style.setProperty('--duration', prevSyl.duration + 'ms')
+                    prevSyl.element.classList.add('done-word')
+                    prevSyl.element.classList.remove('current-word')
+                }
+            }
         }
     }
 
-    if (currentWord.element) {
-        currentWord.element.classList.add('current-word')
-        currentWord.element.classList.add('playing-word')
+    syl.time = time
+    syl.isDone = true
+    syl.duration = 0
+
+    if (syllabusIdx === 0) line.time = time
+    const lastSyl = line.syllabus[line.syllabus.length - 1]
+    if (lastSyl.time > 0) {
+        line.duration = (lastSyl.time + lastSyl.duration) - line.time
     }
 
-    if (lastWord && lastWord.element) {
-        lastWord.element.classList.add('done-word')
-        lastWord.element.classList.remove('current-word')
+    if (syl.element) {
+        const prevCurrent = document.querySelector('.current-word')
+        if (prevCurrent) prevCurrent.classList.remove('current-word')
+        syl.element.classList.add('current-word', 'playing-word')
+        elem_lyricsContent.scrollTop = syl.element.offsetTop - elem_lyricsContent.offsetTop - 100
     }
 
+    lastWordIndex = currentWordIndex
     currentWordIndex++
-
-    if (currentWord.element) {
-        const elem_lyricsContent = document.getElementById('lyrics-content')
-        elem_lyricsContent.scrollTop = currentWord.element.offsetTop - elem_lyricsContent.offsetTop - 100
-    }
-
-    if (currentWordIndex >= tempLyrics.length) {
-        setTimeout(() => {
-            if (currentWord.element) {
-                currentWord.element.classList.remove('current-word')
-                currentWord.element.classList.add('done-word')
-            }
-        }, 500)
-    }
 }
 
 function openWord(wordIndex) {
-    if (wordIndex < 0 || wordIndex >= tempLyrics.length) return
-
-    const word = tempLyrics[wordIndex]
-    if (!word) return
+    if (wordIndex < 0 || wordIndex >= allSyllables.length) return
+    const { lineIdx, syllabusIdx } = allSyllables[wordIndex]
+    const line = tempLyrics[lineIdx]
+    if (!line) return
+    const syl = line.syllabus[syllabusIdx]
+    if (!syl) return
 
     currentWordIndex = wordIndex
     selectedWordIndex = wordIndex
 
     document.querySelectorAll('.opened-word').forEach(el => el.classList.remove('opened-word'))
-    if (word.element) {
-        word.element.classList.add('opened-word')
-    }
+    if (syl.element) syl.element.classList.add('opened-word')
 
-    document.getElementById('properties-word').innerText = word.text || ''
-    document.getElementById('properties-start').value = word.time || 0
-    document.getElementById('properties-length').value = word.duration || 0
-
-    player.currentTime = (word.time || 0) / 1000
+    document.getElementById('properties-word').innerText = syl.text || ''
+    document.getElementById('properties-start').value = syl.time || 0
+    document.getElementById('properties-length').value = syl.duration || 0
+    player.currentTime = (syl.time || 0) / 1000
 }
 
 function unselect() {
     selectedWordIndex = -1
     document.querySelectorAll('.opened-word').forEach(el => el.classList.remove('opened-word'))
-
     document.getElementById('properties-word').innerText = ''
     document.getElementById('properties-start').value = 0
     document.getElementById('properties-length').value = 0
@@ -636,29 +846,19 @@ function unselect() {
 
 function isRTL(s) {
     if (!s || typeof s !== 'string') return false
-
     var ltrChars = 'A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02B8\u0300-\u0590\u0800-\u1FFF' + '\u2C00-\uFB1C\uFDFE-\uFE6F\uFEFD-\uFFFF',
         rtlChars = '\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC',
         rtlDirCheck = new RegExp('^[^' + ltrChars + ']*[' + rtlChars + ']')
-
     return rtlDirCheck.test(s)
 }
 
-// UI functions
 function playPause() {
     const playPauseButton = document.getElementById('playpause-button')
     if (playPauseButton) {
         playPauseButton.classList.add('enabled')
-        setTimeout(() => {
-            playPauseButton.classList.remove('enabled')
-        }, 50)
+        setTimeout(() => { playPauseButton.classList.remove('enabled') }, 50)
     }
-
-    if (player.paused) {
-        player.play()
-    } else {
-        player.pause()
-    }
+    if (player.paused) { player.play() } else { player.pause() }
 }
 
 function previewToggle() {
@@ -682,125 +882,171 @@ document.getElementById('preview-theme')?.addEventListener('change', () => {
     document.getElementById('lyrics-content').setAttribute('data-theme', document.getElementById('preview-theme').value)
 })
 
-// exports
-function prepareJSON(cleanTiming = true) {
-    if (!tempLyrics || tempLyrics.length === 0) {
-        return new Blob(['{}'], { type: 'application/json' })
-    }
-    
-    let exportedLyrics = tempLyrics
-    
-    if (cleanTiming) {
-        exportedLyrics = tempLyrics
-            .filter(word => word && word.text && word.text.trim() !== '')
-            .filter(word => !word.isTaggedLine)
-    }
-    
-    exportedLyrics = exportedLyrics.map(item => ({
-        time: Math.round(item.time || 0),
-        duration: Math.round(item.duration || 0),
-        text: cleanTiming ? (item.displayText || item.text || '').replace(/\]/g, '') : (item.text || ''),
-        isLineEnding: item.isLineEnding ? 1 : 0,
-        element: item.tempElement ? {
-            key: item.tempElement.key || '',
-            songPart: item.tempElement.songPart || null,
-            singer: item.tempElement.singer || null
-        } : {}
-    }))
+function prepareNewKpoeJSON(cleanTiming = true) {
+    if (!tempLyrics || tempLyrics.length === 0) return new Blob(['{}'], { type: 'application/json' })
 
-    const plainText = elem_lyricsInput.value !== "" ? elem_lyricsInput.value : undefined
+    // Recompute songParts time/duration from first/last synced line of each section
+    const partFirstTime = {}
+    const partLastEnd = {}
+    tempLyrics.forEach(line => {
+        if (line.isTaggedLine || !line.time) return
+        const pi = line.element?.songPartIndex
+        if (pi == null || pi < 0) return
+        if (partFirstTime[pi] == null || line.time < partFirstTime[pi]) partFirstTime[pi] = line.time
+        const end = line.time + line.duration
+        if (partLastEnd[pi] == null || end > partLastEnd[pi]) partLastEnd[pi] = end
+    })
+    metadata.songParts.forEach((part, i) => {
+        if (partFirstTime[i] != null) {
+            part.time = partFirstTime[i]
+            part.duration = (partLastEnd[i] || part.time) - part.time
+        }
+    })
 
-    const formattedJSON = {
-        type: "Word",
+    // Use actual audio duration
+    const durMs = (player.duration || 0) * 1000
+    const tMin = Math.floor(durMs / 60000)
+    const tSec = ((durMs % 60000) / 1000).toFixed(3)
+    metadata.totalDuration = tMin + ':' + String(tSec).padStart(6, '0')
+
+    const exportedLyrics = tempLyrics
+        .filter(l => !l.isTaggedLine)
+        .map(line => ({
+            time: Math.round(line.time || 0),
+            duration: Math.round(line.duration || 0),
+            text: (line.text || '').replace(/\]/g, ''),
+            syllabus: (line.syllabus || [])
+                .filter(s => !cleanTiming || (s.text || '').replace(/\]/g, '').trim() !== '')
+                .map(s => ({
+                    time: Math.round(s.time || 0),
+                    duration: Math.round(s.duration || 0),
+                    text: (s.text || '').replace(/\]/g, '')
+                })),
+            element: {
+                key: line.element?.key || '',
+                singer: line.element?.singer || 'v1',
+                songPartIndex: line.element?.songPartIndex ?? -1
+            }
+        }))
+
+    return new Blob([JSON.stringify({
         KpoeTools: AppVersion.version,
-        metadata: metadata,
-        lyrics: exportedLyrics,
-        plainText: plainText,
-        isNotRaw: cleanTiming
-    }
+        type: 'Word',
+        metadata: {
+            source: metadata.source,
+            songWriters: metadata.songWriters,
+            title: metadata.title,
+            language: metadata.language,
+            agents: metadata.agents,
+            songParts: metadata.songParts,
+            totalDuration: metadata.totalDuration
+        },
+        lyrics: exportedLyrics
+    }, null, 4)], { type: 'application/json' })
+}
 
-    const json = JSON.stringify(formattedJSON, null, 4)
-    const blob = new Blob([json], { type: 'application/json' })
-    return blob
+function prepareLegacyJSON(cleanTiming = true) {
+    if (!tempLyrics || tempLyrics.length === 0) return new Blob(['{}'], { type: 'application/json' })
+
+    const durMs = (player.duration || 0) * 1000
+    const tMin = Math.floor(durMs / 60000)
+    const tSec = ((durMs % 60000) / 1000).toFixed(3)
+    metadata.totalDuration = tMin + ':' + String(tSec).padStart(6, '0')
+
+    const exportedWords = []
+    tempLyrics.forEach(line => {
+        if (line.isTaggedLine) return
+        const syllabus = line.syllabus || []
+        const partIdx = line.element?.songPartIndex ?? -1
+        const partName = (partIdx >= 0 && metadata.songParts[partIdx]) ? metadata.songParts[partIdx].name : null
+        const singer = line.element?.singer || 'v1'
+        const key = line.element?.key || ''
+        syllabus.forEach((syl, si) => {
+            const cleanedText = (syl.text || '').replace(/\]/g, '').trim()
+            if (cleanTiming && cleanedText === '') return  // skip whitespace / empty syllables
+            exportedWords.push({
+                time: Math.round(syl.time || 0),
+                duration: Math.round(syl.duration || 0),
+                text: (syl.text || '').replace(/\]/g, ''),
+                isLineEnding: si === syllabus.length - 1 ? 1 : 0,
+                element: { key, songPart: partName, singer }
+            })
+        })
+    })
+
+    const plainText = elem_lyricsInput.value !== '' ? elem_lyricsInput.value : undefined
+    return new Blob([JSON.stringify({
+        type: 'Word', KpoeTools: AppVersion.version,
+        metadata, lyrics: exportedWords, plainText, isNotRaw: true
+    }, null, 4)], { type: 'application/json' })
+}
+
+function prepareJSON(cleanTiming = true) {
+    return prepareLegacyJSON(cleanTiming)
 }
 
 function prepareLRC() {
-    if (!tempLyrics || tempLyrics.length === 0) {
-        return new Blob([''], { type: 'text/plain' })
-    }
+    if (!tempLyrics || tempLyrics.length === 0) return new Blob([''], { type: 'text/plain' })
 
     let lrcContent = ''
-    let currentPhraseTime = ''
-    let currentPhrase = ''
-
-    tempLyrics.forEach((word, index) => {
-        if (!word || word.isTaggedLine) return
-
-        if (index === 0 || tempLyrics[index - 1].isLineEnding === true) {
-            if (currentPhrase !== '') {
-                lrcContent += '[' + currentPhraseTime + ']' + currentPhrase.trim() + '\n'
-            }
-            currentPhraseTime = msToTime(word.time || 0)
-            currentPhrase = word.text || ''
-        } else {
-            currentPhrase += word.text || ''
-        }
+    tempLyrics.forEach(line => {
+        if (!line || line.isTaggedLine) return
+        const syllabus = line.syllabus || []
+        if (!syllabus.length) return
+        const lineTime = line.time || syllabus[0].time || 0
+        const lineText = syllabus.map(s => s.text).join('').trim()
+        lrcContent += '[' + msToTime(lineTime) + ']' + lineText + '\n'
     })
-
-    if (currentPhrase !== '') {
-        lrcContent += '[' + currentPhraseTime + ']' + currentPhrase.trim() + '\n'
-    }
-
-    const formattedContent = lrcContent.trim()
-    const blob = new Blob([formattedContent], { type: 'text/plain' })
-    return blob
+    return new Blob([lrcContent.trim()], { type: 'text/plain' })
 }
 
 function prepareELRC() {
-    if (!tempLyrics || tempLyrics.length === 0) {
-        return new Blob([''], { type: 'text/plain' })
-    }
+    if (!tempLyrics || tempLyrics.length === 0) return new Blob([''], { type: 'text/plain' })
 
     let lrcContent = ''
-
-    tempLyrics.forEach((word, index) => {
-        if (!word || word.isTaggedLine) return
-
-        if (index === 0 || tempLyrics[index - 1].isLineEnding === true) {
-            lrcContent += '\n[' + msToTime(word.time || 0) + ']' + (word.text || '')
-        } else {
-            lrcContent += ' <' + msToTime(word.time || 0) + '>' + (word.text || '')
-        }
+    tempLyrics.forEach(line => {
+        if (!line || line.isTaggedLine) return
+        const syllabus = line.syllabus || []
+        if (!syllabus.length) return
+        let first = true
+        syllabus.forEach(syl => {
+            if (first) {
+                lrcContent += '\n[' + msToTime(syl.time || 0) + ']' + (syl.text || '')
+                first = false
+            } else {
+                lrcContent += ' <' + msToTime(syl.time || 0) + '>' + (syl.text || '')
+            }
+        })
     })
+    return new Blob([lrcContent.trim()], { type: 'text/plain' })
+}
 
-    const formattedContent = lrcContent.trim()
-    const blob = new Blob([formattedContent], { type: 'text/plain' })
-    return blob
+function exportNewKpoeJSON() {
+    downloadBlob(prepareNewKpoeJSON())
+}
+
+function exportLegacyJSON() {
+    downloadBlob(prepareLegacyJSON())
 }
 
 function exportJSON() {
-    const blob = prepareJSON()
-    downloadBlob(blob)
+    exportNewKpoeJSON()
 }
 
 function exportLRC() {
-    const blob = prepareLRC()
-    downloadBlob(blob, 'lrc')
+    downloadBlob(prepareLRC(), 'lrc')
 }
 
 function exportELRC() {
-    const blob = prepareELRC()
-    downloadBlob(blob, 'lrc')
+    downloadBlob(prepareELRC(), 'lrc')
 }
 
 function downloadBlob(blob, format = 'json') {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-
     a.href = url
     a.download = (filename || 'untitled') + '.' + format
     a.click()
-
     setTimeout(() => URL.revokeObjectURL(url), 100)
 }
 
@@ -811,17 +1057,11 @@ function exportKMAKE() {
     }
 
     var zip = new JSZip()
-
     zip.file("audiofile.kmakefile", music_file)
-
-    let jsonLyrics = prepareJSON(false)
+    let jsonLyrics = prepareNewKpoeJSON(false)  // full v2 RAM state, no cleanTiming strip
     zip.file("lyrics.kmakefile", jsonLyrics)
 
-    const options = {
-        type: 'blob',
-        mimeType: 'application/kmake',
-    }
-
+    const options = { type: 'blob', mimeType: 'application/kmake' }
     zip.generateAsync(options).then(function (content) {
         downloadBlob(content, 'kmake')
     })
@@ -845,10 +1085,8 @@ function importKMAKE() {
                     if (audioFile) {
                         audioFile.async("blob").then(function (content) {
                             const file = new File([content], 'audiofile.mp3')
-
                             const fileList = new DataTransfer()
                             fileList.items.add(file)
-
                             elem_musicInput.files = fileList.files
                             elem_musicInput.dispatchEvent(new Event('change'))
                         })
@@ -858,10 +1096,8 @@ function importKMAKE() {
                     if (lyricsFile) {
                         lyricsFile.async("string").then(function (content) {
                             const file = new File([content], 'lyrics.json')
-
                             const fileList = new DataTransfer()
                             fileList.items.add(file)
-
                             importJSON(fileList.files)
                         })
                     }
@@ -875,18 +1111,14 @@ function importKMAKE() {
     input.click()
 }
 
-// shortcuts
 document.addEventListener('keydown', function (event) {
-    if (document.activeElement === elem_lyricsInput) {
-        return
-    }
+    if (document.activeElement === elem_lyricsInput) return
     if (event.keyCode === 13) {
         event.preventDefault()
         nextWord()
     }
 })
 
-// playback
 setInterval(() => {
     if (!tempLyrics || tempLyrics.length === 0) return
 
@@ -898,113 +1130,79 @@ setInterval(() => {
 
     const time = player.currentTime * 1000
 
-    let currentWord = null
-    for (let i = 0; i < tempLyrics.length; i++) {
-        const word = tempLyrics[i]
-        if (!word || (word.time || 0) > time) {
-            let previousWord = tempLyrics[i - 1]
-            while (previousWord && previousWord.isTaggedLine && i > 0) {
-                i--
-                previousWord = tempLyrics[i - 1]
-            }
-            currentWord = previousWord || null
+    let currentSylRef = null
+    for (let i = 0; i < allSyllables.length; i++) {
+        const { lineIdx, syllabusIdx } = allSyllables[i]
+        const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+        if (!syl || !syl.isDone) break
+        if ((syl.time || 0) > time) {
+            if (i > 0) currentSylRef = allSyllables[i - 1]
             break
         }
+        currentSylRef = allSyllables[i]
     }
 
-    const playingWordElement = document.querySelector('.playing-word')
-    if (playingWordElement) {
-        playingWordElement.classList.remove('playing-word')
+    const playingEl = document.querySelector('.playing-word')
+    if (playingEl) playingEl.classList.remove('playing-word')
+
+    let currentSyl = null
+    if (currentSylRef) {
+        currentSyl = tempLyrics[currentSylRef.lineIdx]?.syllabus[currentSylRef.syllabusIdx]
+        if (currentSyl?.element) currentSyl.element.classList.add('playing-word')
     }
 
-    if (currentWord && currentWord.element) {
-        currentWord.element.classList.add('playing-word')
-    }
+    const currentText = currentSyl?.text || ''
+    if (currentText === played_word) return
+    played_word = currentText
 
-    if (currentWord && currentWord.text === played_word) {
-        return
-    } else if (!currentWord) {
-        played_word = ''
-        return
-    } else {
-        played_word = currentWord.text
-    }
+    const allSylElems = Array.from(document.querySelectorAll('.lyrics-word')).filter(el => el.id.startsWith('syl-'))
+    const currentElem = currentSyl?.element
+    const currentElemIdx = currentElem ? allSylElems.indexOf(currentElem) : -1
+    allSylElems.forEach((el, idx) => { el.classList.toggle('past-word', idx < currentElemIdx) })
 
-    const allWords = Array.from(document.querySelectorAll('.lyrics-word')).filter(word => {
-        const wordIndex = parseInt(word.id.split('-')[1])
-        return wordIndex >= 0 && wordIndex < tempLyrics.length && !tempLyrics[wordIndex]?.isTaggedLine
+    document.querySelectorAll('.lyrics-line:not(.tagged-line)').forEach(l => {
+        l.classList.remove('playing-line', 'next-playing-line', 'previous-playing-line', 'next-next-playing-line')
     })
 
-    const currentIndex = currentWord.element ? allWords.indexOf(currentWord.element) : -1
-    allWords.forEach((word, index) => {
-        word.classList.toggle('past-word', index < currentIndex)
-    })
-
-    document.querySelectorAll('.lyrics-line:not(.tagged-line)').forEach(line => {
-        line.classList.remove('playing-line', 'next-playing-line', 'previous-playing-line', 'next-next-playing-line')
-    })
-
-    if (!currentWord || !currentWord.element) return
-
-    const lyricsLine = currentWord.element.closest('.lyrics-line')
-    if (!lyricsLine || lyricsLine.classList.contains('tagged-line')) {
-        return
-    }
+    if (!currentSyl?.element) return
+    const lyricsLine = currentSyl.element.closest('.lyrics-line')
+    if (!lyricsLine || lyricsLine.classList.contains('tagged-line')) return
 
     function getValidLine(element, direction) {
-        let currentElement = element
-        while (currentElement) {
-            currentElement = direction === 'next' ?
-                currentElement.nextElementSibling :
-                currentElement.previousElementSibling
-
-            if (currentElement && !currentElement.classList.contains('tagged-line')) {
-                return currentElement
-            }
+        let cur = element
+        while (cur) {
+            cur = direction === 'next' ? cur.nextElementSibling : cur.previousElementSibling
+            if (cur && !cur.classList.contains('tagged-line')) return cur
         }
         return null
     }
 
     lyricsLine.classList.add('playing-line')
-
     const nextLine = getValidLine(lyricsLine, 'next')
     if (nextLine) {
         nextLine.classList.add('next-playing-line')
-        const nextNextLine = getValidLine(nextLine, 'next')
-        if (nextNextLine) {
-            nextNextLine.classList.add('next-next-playing-line')
-        }
+        const nextNext = getValidLine(nextLine, 'next')
+        if (nextNext) nextNext.classList.add('next-next-playing-line')
     }
-
-    const previousLine = getValidLine(lyricsLine, 'previous')
-    if (previousLine) {
-        previousLine.classList.add('previous-playing-line')
-    }
+    const prevLine = getValidLine(lyricsLine, 'previous')
+    if (prevLine) prevLine.classList.add('previous-playing-line')
 
     if (document.getElementById('lyrics-content').classList.contains('preview')) {
         const lyricsContent = document.getElementById('lyrics-content')
-        const currentLineTop = lyricsLine.offsetTop
-        lyricsContent.scrollTop = currentLineTop - lyricsContent.clientHeight / 2 + 120
+        lyricsContent.scrollTop = lyricsLine.offsetTop - lyricsContent.clientHeight / 2 + 120
     }
 }, 1)
 
-// events
 elem_musicInput.addEventListener('change', function () {
     const file = this.files[0]
     if (!file) return
 
     const objectURL = URL.createObjectURL(file)
-    
     player.source = {
         type: 'audio',
         title: 'Local File',
-        sources: [
-            {
-                src: objectURL,
-                type: file.type || 'audio/mp3', 
-            },
-        ],
-    };
+        sources: [{ src: objectURL, type: file.type || 'audio/mp3' }],
+    }
 
     music_file = file
     document.getElementById('music-title').innerText = "Unknown Title"
@@ -1051,103 +1249,79 @@ player.on('play', function () {
 })
 
 document.addEventListener('keydown', function (event) {
-    if (document.activeElement === elem_lyricsInput) {
-        return
-    }
+    if (document.activeElement === elem_lyricsInput) return
     if (event.keyCode === 32) {
-        if (document.activeElement.tagName === 'BUTTON' || document.activeElement === elem_musicPlayer) {
-            return
-        }
-
+        if (document.activeElement.tagName === 'BUTTON' || document.activeElement === elem_musicPlayer) return
         playPause()
         event.preventDefault()
     }
 })
 
 document.addEventListener('keydown', function (event) {
-    if (document.activeElement === elem_lyricsInput) {
-        return
-    }
+    if (document.activeElement === elem_lyricsInput) return
 
-    if (event.keyCode === 37) {
-        goBackIndex -= 1
-    }
+    if (event.keyCode === 37) goBackIndex -= 1
     if (event.keyCode === 39) {
         goBackIndex += 1
-
-        if (goBackIndex > 0) {
-            goBackIndex = 0
-        }
+        if (goBackIndex > 0) goBackIndex = 0
     }
 
     if (event.keyCode === 37 || event.keyCode === 39) {
         const targetIndex = currentWordIndex + goBackIndex
-        if (targetIndex >= 0 && targetIndex < tempLyrics.length) {
-            let word = tempLyrics[targetIndex]
-            if (word && word.time !== undefined) {
-                player.currentTime = word.time / 1000
-            }
+        if (targetIndex >= 0 && targetIndex < allSyllables.length) {
+            const { lineIdx, syllabusIdx } = allSyllables[targetIndex]
+            const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+            if (syl && syl.time !== undefined) player.currentTime = syl.time / 1000
         }
     }
 })
 
 document.addEventListener('click', function (event) {
     if (event.target.classList.contains('lyrics-word')) {
-        const word = event.target
-        if (word.id) {
-            const wordIndex = parseInt(word.id.split('-')[1])
-            if (!isNaN(wordIndex)) {
-                openWord(wordIndex)
-            }
+        const el = event.target
+        // Syllable spans use id format: syl-{lineIdx}-{syllabusIdx}
+        if (el.id && el.id.startsWith('syl-')) {
+            const parts = el.id.split('-')
+            const li = parseInt(parts[1])
+            const si = parseInt(parts[2])
+            const idx = allSyllables.findIndex(a => a.lineIdx === li && a.syllabusIdx === si)
+            if (idx !== -1) openWord(idx)
         }
     }
 })
 
 document.getElementById('properties-start')?.addEventListener('change', function (event) {
-    if (selectedWordIndex === -1 || selectedWordIndex >= tempLyrics.length) {
-        return
-    }
-    const newTime = parseInt(event.target.value) || 0
-    tempLyrics[selectedWordIndex].time = Math.max(0, newTime)
+    if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
+    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
+    const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+    if (!syl) return
+    syl.time = Math.max(0, parseInt(event.target.value) || 0)
 })
 
 document.getElementById('properties-length')?.addEventListener('change', function (event) {
-    if (selectedWordIndex === -1 || selectedWordIndex >= tempLyrics.length) {
-        return
-    }
-    const newDuration = parseInt(event.target.value) || 0
-    tempLyrics[selectedWordIndex].duration = Math.max(0, newDuration)
-
-    if (tempLyrics[selectedWordIndex].element) {
-        tempLyrics[selectedWordIndex].element.style.setProperty('--duration', tempLyrics[selectedWordIndex].duration + 'ms')
-    }
+    if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
+    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
+    const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+    if (!syl) return
+    syl.duration = Math.max(0, parseInt(event.target.value) || 0)
+    if (syl.element) syl.element.style.setProperty('--duration', syl.duration + 'ms')
 })
 
 document.getElementById('properties-preview')?.addEventListener('click', function (event) {
-    if (selectedWordIndex === -1 || selectedWordIndex >= tempLyrics.length) {
-        return
-    }
-
-    const word = tempLyrics[selectedWordIndex]
-    if (!word) return
-
-    player.currentTime = (word.time || 0) / 1000
+    if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
+    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
+    const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+    if (!syl) return
+    player.currentTime = (syl.time || 0) / 1000
     player.play()
-
-    const duration = word.duration || 1000
-    setTimeout(() => {
-        player.pause()
-    }, duration)
+    setTimeout(() => { player.pause() }, syl.duration || 1000)
 })
 
 window.addEventListener('load', function () {
     const loadingElement = document.getElementById('loading')
-    if (loadingElement) {
-        loadingElement.style.display = 'none'
-    }
+    if (loadingElement) loadingElement.style.display = 'none'
 })
 
-// dropdown
 if (typeof tippy !== 'undefined') {
     tippy('#file-drop', {
         content: `
@@ -1157,7 +1331,8 @@ if (typeof tippy !== 'undefined') {
                 <button onclick="exportKMAKE()">Save as</button>
             </div>
             <div id="export-dropdown" class="dropdown-content">
-                <button onclick="exportJSON()" id="json-button">Export as JSON</button>
+                <button onclick="exportNewKpoeJSON()" id="json-button">Export as JSON</button>
+                <button onclick="exportLegacyJSON()" id="legacy-json-button">Export as Just Dance KTAPE</button>
                 <button onclick="exportLRC()" id="lrc-button">Export as LRC</button>
                 <button onclick="exportELRC()" id="elrc-button">Export as eLRC</button>
             </div>
