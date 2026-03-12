@@ -833,7 +833,31 @@ function openWord(wordIndex) {
     document.getElementById('properties-word').innerText = syl.text || ''
     document.getElementById('properties-start').value = syl.time || 0
     document.getElementById('properties-length').value = syl.duration || 0
+    updateTimeDisplays()
     player.currentTime = (syl.time || 0) / 1000
+
+    // Populate line info
+    const lineTextEl = document.getElementById('properties-line-text')
+    if (lineTextEl) lineTextEl.textContent = (line.text || '').trim() || '(empty line)'
+
+    // Populate agent dropdown for the line
+    const agentSel = document.getElementById('properties-line-agent')
+    if (agentSel) {
+        agentSel.innerHTML = ''
+        Object.entries(metadata.agents).forEach(([alias, agent]) => {
+            const opt = document.createElement('option')
+            opt.value = alias
+            opt.textContent = agent.name ? `${alias} — ${agent.name}` : alias
+            if (alias === (line.element?.singer || 'v1')) opt.selected = true
+            agentSel.appendChild(opt)
+        })
+    }
+
+    // Show filled state
+    const empty = document.getElementById('props-empty')
+    const filled = document.getElementById('props-filled')
+    if (empty) empty.style.display = 'none'
+    if (filled) filled.style.display = 'flex'
 }
 
 function unselect() {
@@ -842,6 +866,11 @@ function unselect() {
     document.getElementById('properties-word').innerText = ''
     document.getElementById('properties-start').value = 0
     document.getElementById('properties-length').value = 0
+    updateTimeDisplays()
+    const empty = document.getElementById('props-empty')
+    const filled = document.getElementById('props-filled')
+    if (empty) empty.style.display = 'flex'
+    if (filled) filled.style.display = 'none'
 }
 
 function isRTL(s) {
@@ -885,7 +914,7 @@ document.getElementById('preview-theme')?.addEventListener('change', () => {
 function prepareNewKpoeJSON(cleanTiming = true) {
     if (!tempLyrics || tempLyrics.length === 0) return new Blob(['{}'], { type: 'application/json' })
 
-    // Recompute songParts time/duration from first/last synced line of each section
+    // 1. Recompute songParts time/duration from first/last synced line of each section
     const partFirstTime = {}
     const partLastEnd = {}
     tempLyrics.forEach(line => {
@@ -896,6 +925,7 @@ function prepareNewKpoeJSON(cleanTiming = true) {
         const end = line.time + line.duration
         if (partLastEnd[pi] == null || end > partLastEnd[pi]) partLastEnd[pi] = end
     })
+
     metadata.songParts.forEach((part, i) => {
         if (partFirstTime[i] != null) {
             part.time = partFirstTime[i]
@@ -903,31 +933,52 @@ function prepareNewKpoeJSON(cleanTiming = true) {
         }
     })
 
-    // Use actual audio duration
+    // 2. Set total duration
     const durMs = (player.duration || 0) * 1000
     const tMin = Math.floor(durMs / 60000)
     const tSec = ((durMs % 60000) / 1000).toFixed(3)
     metadata.totalDuration = tMin + ':' + String(tSec).padStart(6, '0')
 
+    // 3. Process and Clean Lyrics
     const exportedLyrics = tempLyrics
-        .filter(l => !l.isTaggedLine)
-        .map(line => ({
-            time: Math.round(line.time || 0),
-            duration: Math.round(line.duration || 0),
-            text: (line.text || '').replace(/\]/g, ''),
-            syllabus: (line.syllabus || [])
+        .filter(l => {
+            if (l.isTaggedLine) return false;
+            // Skip lines that are empty or just whitespace if cleaning is enabled
+            if (cleanTiming && (l.text || '').trim() === '') return false;
+            return true;
+        })
+        .map(line => {
+            // Clean and filter syllables first
+            const cleanedSyllables = (line.syllabus || [])
                 .filter(s => !cleanTiming || (s.text || '').replace(/\]/g, '').trim() !== '')
                 .map(s => ({
                     time: Math.round(s.time || 0),
                     duration: Math.round(s.duration || 0),
                     text: (s.text || '').replace(/\]/g, '')
-                })),
-            element: {
-                key: line.element?.key || '',
-                singer: line.element?.singer || 'v1',
-                songPartIndex: line.element?.songPartIndex ?? -1
+                }));
+
+            let actualLineDuration = Math.round(line.duration || 0);
+            if (cleanedSyllables.length > 0) {
+                const lastSyllable = cleanedSyllables[cleanedSyllables.length - 1];
+                const lineEnd = lastSyllable.time + lastSyllable.duration;
+                actualLineDuration = lineEnd - Math.round(line.time || 0);
             }
-        }))
+
+            // Reconstruct line text from the cleaned syllables to keep them in sync
+            const reconstructedText = cleanedSyllables.map(s => s.text).join('');
+
+            return {
+                time: Math.round(line.time || 0),
+                duration: actualLineDuration,
+                text: reconstructedText,
+                syllabus: cleanedSyllables,
+                element: {
+                    key: line.element?.key || '',
+                    singer: line.element?.singer || 'v1',
+                    songPartIndex: line.element?.songPartIndex ?? -1
+                }
+            };
+        });
 
     return new Blob([JSON.stringify({
         KpoeTools: AppVersion.version,
@@ -956,19 +1007,28 @@ function prepareLegacyJSON(cleanTiming = true) {
     const exportedWords = []
     tempLyrics.forEach(line => {
         if (line.isTaggedLine) return
+
+        // If cleanTiming is on, don't even process lines that are empty
+        if (cleanTiming && (line.text || '').trim() === '') return;
+
         const syllabus = line.syllabus || []
         const partIdx = line.element?.songPartIndex ?? -1
         const partName = (partIdx >= 0 && metadata.songParts[partIdx]) ? metadata.songParts[partIdx].name : null
         const singer = line.element?.singer || 'v1'
         const key = line.element?.key || ''
-        syllabus.forEach((syl, si) => {
-            const cleanedText = (syl.text || '').replace(/\]/g, '').trim()
-            if (cleanTiming && cleanedText === '') return  // skip whitespace / empty syllables
+
+        // Filter syllables that are just whitespace
+        const activeSyllables = syllabus.filter(syl => {
+            const cleaned = (syl.text || '').replace(/\]/g, '').trim();
+            return !cleanTiming || cleaned !== '';
+        });
+
+        activeSyllables.forEach((syl, si) => {
             exportedWords.push({
                 time: Math.round(syl.time || 0),
                 duration: Math.round(syl.duration || 0),
                 text: (syl.text || '').replace(/\]/g, ''),
-                isLineEnding: si === syllabus.length - 1 ? 1 : 0,
+                isLineEnding: si === activeSyllables.length - 1 ? 1 : 0,
                 element: { key, songPart: partName, singer }
             })
         })
@@ -1290,21 +1350,23 @@ document.addEventListener('click', function (event) {
     }
 })
 
-document.getElementById('properties-start')?.addEventListener('change', function (event) {
+document.getElementById('properties-start')?.addEventListener('input', function (event) {
     if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
     const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
     const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
     if (!syl) return
     syl.time = Math.max(0, parseInt(event.target.value) || 0)
+    updateTimeDisplays()
 })
 
-document.getElementById('properties-length')?.addEventListener('change', function (event) {
+document.getElementById('properties-length')?.addEventListener('input', function (event) {
     if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
     const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
     const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
     if (!syl) return
     syl.duration = Math.max(0, parseInt(event.target.value) || 0)
     if (syl.element) syl.element.style.setProperty('--duration', syl.duration + 'ms')
+    updateTimeDisplays()
 })
 
 document.getElementById('properties-preview')?.addEventListener('click', function (event) {
@@ -1314,7 +1376,7 @@ document.getElementById('properties-preview')?.addEventListener('click', functio
     if (!syl) return
     player.currentTime = (syl.time || 0) / 1000
     player.play()
-    setTimeout(() => { player.pause() }, syl.duration || 1000)
+    setTimeout(() => { player.pause() }, (syl.duration || 1000) + 300)
 })
 
 window.addEventListener('load', function () {
@@ -1395,3 +1457,549 @@ if (typeof tippy !== 'undefined') {
         placement: 'bottom-start',
     })
 }
+// ============================================================
+// PROPERTIES PANEL HELPERS
+// ============================================================
+
+function msToDisplayTime(ms) {
+    const totalMs = Math.max(0, Math.round(ms))
+    const min = Math.floor(totalMs / 60000)
+    const sec = Math.floor((totalMs % 60000) / 1000)
+    const mill = totalMs % 1000
+    return `${min}:${String(sec).padStart(2, '0')}.${String(mill).padStart(3, '0')}`
+}
+
+function updateTimeDisplays() {
+    const startVal = parseInt(document.getElementById('properties-start')?.value) || 0
+    const lengthVal = parseInt(document.getElementById('properties-length')?.value) || 0
+    const sd = document.getElementById('props-start-display')
+    const ld = document.getElementById('props-length-display')
+    if (sd) sd.textContent = msToDisplayTime(startVal)
+    if (ld) ld.textContent = msToDisplayTime(lengthVal)
+}
+
+function nudgeProperty(field, delta) {
+    if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
+    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
+    const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+    if (!syl) return
+
+    const inputId = field === 'start' ? 'properties-start' : 'properties-length'
+    const input = document.getElementById(inputId)
+    if (!input) return
+
+    const newVal = Math.max(0, (parseInt(input.value) || 0) + delta)
+    input.value = newVal
+
+    if (field === 'start') {
+        syl.time = newVal
+    } else {
+        syl.duration = newVal
+        if (syl.element) syl.element.style.setProperty('--duration', syl.duration + 'ms')
+    }
+    updateTimeDisplays()
+}
+
+function syncWordToCursor(field) {
+    if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
+    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
+    const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+    if (!syl) return
+    const timeMs = Math.round(player.currentTime * 1000)
+    const input = document.getElementById('properties-start')
+    if (input) input.value = timeMs
+    syl.time = timeMs
+    syl.isDone = true
+    if (syl.element) syl.element.classList.add('done-word')
+    updateTimeDisplays()
+    showToast(`Synced to ${msToDisplayTime(timeMs)}`)
+}
+
+function changeSelectedLineAgent(newAlias) {
+    if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
+    const { lineIdx } = allSyllables[selectedWordIndex]
+    const line = tempLyrics[lineIdx]
+    if (!line || !line.element) return
+    const oldAlias = line.element.singer || 'v1'
+    line.element.singer = newAlias
+
+    // Also update the plaintext textarea to reflect singer change
+    const textLines = elem_lyricsInput.value.split('\n')
+    let lineCounter = 0
+    for (let i = 0; i < textLines.length; i++) {
+        const t = textLines[i].trim()
+        if (extractAgentDeclaration(t) || isValidTag(t)) continue
+        if (lineCounter === line.lineIndex) {
+            const prefixRe = new RegExp(`^\\s*${oldAlias}:`)
+            if (prefixRe.test(textLines[i])) {
+                textLines[i] = textLines[i].replace(prefixRe, newAlias + ':')
+            } else {
+                textLines[i] = newAlias + ':' + textLines[i]
+            }
+            break
+        }
+        lineCounter++
+    }
+    elem_lyricsInput.value = textLines.join('\n')
+    showToast(`Line reassigned to ${newAlias}`)
+}
+
+// ============================================================
+// AGENT MANAGER
+// ============================================================
+
+function openAgentManager() {
+    const existing = document.getElementById('agent-manager-modal')
+    if (existing) existing.remove()
+
+    const modal = document.createElement('div')
+    modal.id = 'agent-manager-modal'
+    modal.className = 'kmake-modal'
+    modal.innerHTML = `
+        <div class="kmake-modal-backdrop" onclick="closeAgentManager()"></div>
+        <div class="kmake-modal-content" style="min-width:560px;max-width:700px">
+            <div class="kmake-modal-header">
+                <i data-lucide="users" class="modal-header-icon"></i>
+                <h2>Agent Manager</h2>
+                <button onclick="closeAgentManager()" class="modal-close-btn" title="Close"><i data-lucide="x"></i></button>
+            </div>
+            <div class="kmake-modal-body">
+                <p class="modal-hint">Agents are singers or performers. Each gets a short <b>alias</b> (like <code>v1</code>) used in lyrics lines.</p>
+                <div id="agent-list" class="agent-list"></div>
+                <button onclick="addAgentRow()" class="btn-add-agent"><i data-lucide="plus"></i> Add Agent</button>
+            </div>
+            <div class="kmake-modal-footer">
+                <button onclick="saveAgents()" class="btn-primary">Save & Apply</button>
+                <button onclick="closeAgentManager()" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    `
+    document.body.appendChild(modal)
+    renderAgentList()
+    requestAnimationFrame(() => { modal.classList.add('visible'); lucide.createIcons() })
+}
+
+function renderAgentList() {
+    const list = document.getElementById('agent-list')
+    if (!list) return
+    list.innerHTML = ''
+    Object.entries(metadata.agents).forEach(([alias, agent]) => {
+        appendAgentRow(list, alias, agent.name || '', agent.type || 'person')
+    })
+}
+
+function appendAgentRow(list, alias, name, type) {
+    const row = document.createElement('div')
+    row.className = 'agent-row'
+    row.innerHTML = `
+        <div class="agent-row-fields">
+            <div class="agent-field agent-field-alias">
+                <label>Alias <span class="field-hint">(used in lyrics)</span></label>
+                <input type="text" class="agent-alias-input" value="${alias}" placeholder="v1" spellcheck="false" />
+            </div>
+            <div class="agent-field agent-field-name">
+                <label>Display Name <span class="field-hint">(optional)</span></label>
+                <input type="text" class="agent-name-input" value="${name}" placeholder="Artist Name" />
+            </div>
+            <div class="agent-field agent-field-type">
+                <label>Type</label>
+                <select class="agent-type-input">
+                    <option value="person" ${type === 'person' ? 'selected' : ''}>Person</option>
+                    <option value="group" ${type === 'group' ? 'selected' : ''}>Group</option>
+                    <option value="virtual" ${type === 'virtual' ? 'selected' : ''}>Virtual</option>
+                    <option value="other" ${type === 'other' ? 'selected' : ''}>Other</option>
+                </select>
+            </div>
+        </div>
+        <button class="btn-remove-agent" title="Remove agent" onclick="this.closest('.agent-row').remove()"><i data-lucide="trash-2"></i></button>
+    `
+    list.appendChild(row)
+    if (typeof lucide !== 'undefined') lucide.createIcons({ nodes: [row] })
+}
+
+function addAgentRow() {
+    const list = document.getElementById('agent-list')
+    if (!list) return
+    const existingAliases = Array.from(list.querySelectorAll('.agent-alias-input')).map(i => i.value)
+    let n = existingAliases.length + 1
+    while (existingAliases.includes('v' + n)) n++
+    appendAgentRow(list, 'v' + n, '', 'person')
+    list.lastElementChild?.querySelector('.agent-alias-input')?.focus()
+}
+
+function saveAgents() {
+    const rows = document.querySelectorAll('#agent-list .agent-row')
+    const newAgents = {}
+    let hasError = false
+
+    rows.forEach(row => {
+        const alias = row.querySelector('.agent-alias-input').value.trim()
+        const name = row.querySelector('.agent-name-input').value.trim()
+        const type = row.querySelector('.agent-type-input').value
+
+        if (!alias) { showToast('Alias cannot be empty', 3000, 'error'); hasError = true; return }
+        if (newAgents[alias]) { showToast(`Duplicate alias: ${alias}`, 3000, 'error'); hasError = true; return }
+        newAgents[alias] = { type, name, alias }
+    })
+
+    if (hasError) return
+
+    const oldAliases = new Set(Object.keys(metadata.agents))
+    const removedAliases = [...oldAliases].filter(a => !newAgents[a])
+
+    metadata.agents = newAgents
+    updateAgentDeclarationsInText()
+    closeAgentManager()
+    parseLyrics()
+
+    if (removedAliases.length) {
+        showToast(`Agents saved — removed: ${removedAliases.join(', ')}`)
+    } else {
+        showToast('Agents saved')
+    }
+}
+
+function updateAgentDeclarationsInText() {
+    const currentText = elem_lyricsInput.value
+    const lines = currentText.split('\n')
+    const nonAgentLines = lines.filter(l => !extractAgentDeclaration(l.trim()))
+
+    const agentDecls = Object.values(metadata.agents).map(agent =>
+        agent.name
+            ? `[agent:${agent.type}=${agent.alias}:${agent.name}]`
+            : `[agent:${agent.type}=${agent.alias}]`
+    )
+
+    // Drop leading empty lines from content before rejoining
+    let contentStart = 0
+    while (contentStart < nonAgentLines.length && nonAgentLines[contentStart].trim() === '') contentStart++
+
+    elem_lyricsInput.value = [...agentDecls, '', ...nonAgentLines.slice(contentStart)].join('\n')
+}
+
+function closeAgentManager() {
+    const modal = document.getElementById('agent-manager-modal')
+    if (!modal) return
+    modal.classList.remove('visible')
+    setTimeout(() => modal.remove(), 200)
+}
+
+// ============================================================
+// METADATA EDITOR
+// ============================================================
+
+function openMetadataEditor() {
+    const existing = document.getElementById('metadata-modal')
+    if (existing) existing.remove()
+
+    const modal = document.createElement('div')
+    modal.id = 'metadata-modal'
+    modal.className = 'kmake-modal'
+    modal.innerHTML = `
+        <div class="kmake-modal-backdrop" onclick="closeMetadataEditor()"></div>
+        <div class="kmake-modal-content" style="max-width:500px">
+            <div class="kmake-modal-header">
+                <i data-lucide="music" class="modal-header-icon"></i>
+                <h2>Song Metadata</h2>
+                <button onclick="closeMetadataEditor()" class="modal-close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <div class="kmake-modal-body">
+
+                <div class="meta-group-label">Song Info</div>
+                <div class="meta-field">
+                    <label>Title</label>
+                    <input type="text" id="meta-title" value="${escapeHtmlAttr(metadata.title)}" placeholder="Song title" />
+                </div>
+                <div class="meta-row">
+                    <div class="meta-field">
+                        <label>Artist</label>
+                        <input type="text" id="meta-artist" value="${escapeHtmlAttr(metadata.artist || '')}" placeholder="Main artist" />
+                    </div>
+                    <div class="meta-field">
+                        <label>Album</label>
+                        <input type="text" id="meta-album" value="${escapeHtmlAttr(metadata.album || '')}" placeholder="Album name" />
+                    </div>
+                </div>
+                <div class="meta-field">
+                    <label>Songwriters <span class="meta-field-hint">comma-separated</span></label>
+                    <input type="text" id="meta-writers" value="${escapeHtmlAttr((metadata.songWriters || []).join(', '))}" placeholder="Writer 1, Writer 2" />
+                </div>
+
+                <div class="meta-divider"></div>
+                <div class="meta-group-label">Optional</div>
+
+                <div class="meta-row">
+                    <div class="meta-field">
+                        <label>Language</label>
+                        <input type="text" id="meta-language" value="${escapeHtmlAttr(metadata.language || '')}" placeholder="en, ja, ko…" />
+                    </div>
+                    <div class="meta-field">
+                        <label>ISRC</label>
+                        <input type="text" id="meta-isrc" value="${escapeHtmlAttr(metadata.isrc || '')}" placeholder="ISRC code" />
+                    </div>
+                </div>
+                <div class="meta-field">
+                    <label>Curator</label>
+                    <input type="text" id="meta-curator" value="${escapeHtmlAttr(metadata.curator || 'Kmake')}" placeholder="Kmake" />
+                </div>
+            </div>
+            <div class="kmake-modal-footer">
+                <button onclick="saveMetadata()" class="btn-primary">Save</button>
+                <button onclick="closeMetadataEditor()" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    `
+    document.body.appendChild(modal)
+    requestAnimationFrame(() => { modal.classList.add('visible'); lucide.createIcons() })
+}
+
+function saveMetadata() {
+    metadata.title = document.getElementById('meta-title').value.trim()
+    metadata.artist = document.getElementById('meta-artist').value.trim()
+    metadata.album = document.getElementById('meta-album').value.trim()
+    metadata.language = document.getElementById('meta-language').value.trim()
+    metadata.isrc = document.getElementById('meta-isrc').value.trim()
+    metadata.curator = document.getElementById('meta-curator').value.trim() || 'Kmake'
+    const writersRaw = document.getElementById('meta-writers').value.trim()
+    metadata.songWriters = writersRaw ? writersRaw.split(',').map(s => s.trim()).filter(Boolean) : []
+    closeMetadataEditor()
+    showToast('Metadata saved')
+}
+
+function closeMetadataEditor() {
+    const modal = document.getElementById('metadata-modal')
+    if (!modal) return
+    modal.classList.remove('visible')
+    setTimeout(() => modal.remove(), 200)
+}
+
+function escapeHtmlAttr(str) {
+    return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// ============================================================
+// PLAIN TEXT TUTORIAL
+// ============================================================
+
+function openTutorial() {
+    const existing = document.getElementById('tutorial-modal')
+    if (existing) existing.remove()
+
+    const modal = document.createElement('div')
+    modal.id = 'tutorial-modal'
+    modal.className = 'kmake-modal'
+    modal.innerHTML = `
+        <div class="kmake-modal-backdrop" onclick="closeTutorial()"></div>
+        <div class="kmake-modal-content tutorial-content">
+            <div class="kmake-modal-header">
+                <i data-lucide="book-open" class="modal-header-icon"></i>
+                <h2>How to use Kmake</h2>
+                <button onclick="closeTutorial()" class="modal-close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <div class="kmake-modal-body tutorial-body">
+
+                <div class="tutorial-tabs">
+                    <button class="tutorial-tab active" onclick="switchTutorialTab(this, 'tab-workflow')">Workflow</button>
+                    <button class="tutorial-tab" onclick="switchTutorialTab(this, 'tab-syntax')">Lyrics Syntax</button>
+                    <button class="tutorial-tab" onclick="switchTutorialTab(this, 'tab-shortcuts')">Shortcuts</button>
+                </div>
+
+                <div id="tab-workflow" class="tutorial-tab-panel active">
+                    <div class="tutorial-step">
+                        <div class="step-num">1</div>
+                        <div class="step-body">
+                            <b>Load Music</b>
+                            <p>Click <kbd>Music → Load From File</kbd> to import an audio file, or use <kbd>Load From YouTube</kbd> for a YouTube link.</p>
+                        </div>
+                    </div>
+                    <div class="tutorial-step">
+                        <div class="step-num">2</div>
+                        <div class="step-body">
+                            <b>Enter Lyrics</b>
+                            <p>Type or paste your lyrics in the <b>Lyrics</b> panel. Use the <b>Syntax</b> tab to learn formatting. Click <kbd>Parse</kbd> to preview.</p>
+                        </div>
+                    </div>
+                    <div class="tutorial-step">
+                        <div class="step-num">3</div>
+                        <div class="step-body">
+                            <b>Set Up Agents (Singers)</b>
+                            <p>Click <kbd>Agents</kbd> in the header to add or edit singers. Each singer needs an alias like <code>v1</code>.</p>
+                        </div>
+                    </div>
+                    <div class="tutorial-step">
+                        <div class="step-num">4</div>
+                        <div class="step-body">
+                            <b>Sync Words</b>
+                            <p>Press <kbd>Space</kbd> to play, then press <kbd>Enter</kbd> on each word/syllable as it's sung. The word turns green when active.</p>
+                        </div>
+                    </div>
+                    <div class="tutorial-step">
+                        <div class="step-num">5</div>
+                        <div class="step-body">
+                            <b>Export</b>
+                            <p>Go to <kbd>File → Export</kbd> to save as JSON, LRC, eLRC, or the native <code>.kmake</code> format.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-syntax" class="tutorial-tab-panel">
+                    <div class="syntax-section">
+                        <h3>Basic Lyrics</h3>
+                        <p>Each line of text becomes one lyric line:</p>
+                        <div class="code-block">Hello world
+This is the second line</div>
+                    </div>
+                    <div class="syntax-section">
+                        <h3>Declare Agents</h3>
+                        <p>Add at the top of your lyrics. Format: <code>[agent:TYPE=ALIAS:Name]</code></p>
+                        <div class="code-block">[agent:person=v1:Taylor Swift]
+[agent:group=v2:The Band]
+[agent:virtual=v3]</div>
+                        <p>Types: <code>person</code> &nbsp;|&nbsp; <code>group</code> &nbsp;|&nbsp; <code>virtual</code> &nbsp;|&nbsp; <code>other</code></p>
+                        <p class="tip">Use the <b>Agents</b> button to manage this visually instead of typing!</p>
+                    </div>
+                    <div class="syntax-section">
+                        <h3>Assign Lines to Singers</h3>
+                        <p>Prefix lines with <code>alias:</code></p>
+                        <div class="code-block">v1:This line is sung by singer 1
+v2:This line is sung by singer 2
+v1:Back to singer 1</div>
+                    </div>
+                    <div class="syntax-section">
+                        <h3>Song Sections</h3>
+                        <p>Mark sections with <code>#</code>:</p>
+                        <div class="code-block">#Verse 1
+v1:First verse line here
+
+#Chorus
+v1:Chorus line here</div>
+                    </div>
+                    <div class="syntax-section">
+                        <h3>Syllable Splitting</h3>
+                        <p>Use <code>]</code> or <code>-</code> to split words into individually-timed syllables:</p>
+                        <div class="code-block">v1:Beau]ti]ful
+v1:A-ma-zing</div>
+                    </div>
+                    <div class="syntax-section">
+                        <h3>Full Example</h3>
+                        <div class="code-block">[agent:person=v1:Alice]
+[agent:person=v2:Bob]
+
+#Verse 1
+v1:Hel]lo world, it's me
+v2:And I am here with you
+
+#Chorus
+v1:We sing to]ge]ther
+v2:Be]neath the stars</div>
+                    </div>
+                </div>
+
+                <div id="tab-shortcuts" class="tutorial-tab-panel">
+                    <div class="shortcut-group">
+                        <h3>Syncing</h3>
+                        <div class="shortcut-list">
+                            <div class="shortcut-row"><kbd>Enter</kbd><span>Stamp next word (sync)</span></div>
+                            <div class="shortcut-row"><kbd>Space</kbd><span>Play / Pause music</span></div>
+                            <div class="shortcut-row"><kbd>←</kbd><span>Seek to previous word</span></div>
+                            <div class="shortcut-row"><kbd>→</kbd><span>Seek to next word</span></div>
+                        </div>
+                    </div>
+                    <div class="shortcut-group">
+                        <h3>Tips</h3>
+                        <ul class="tip-list">
+                            <li>Click any word in the Sync panel to <b>select</b> it and edit its timing in the Properties panel.</li>
+                            <li>Enable <b>Preview Mode</b> to see a karaoke-style view with themes.</li>
+                            <li>Use <b>File → Save as</b> to save a <code>.kmake</code> file (audio + lyrics bundled).</li>
+                            <li>Drag panel titles to rearrange the layout.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `
+    document.body.appendChild(modal)
+    requestAnimationFrame(() => { modal.classList.add('visible'); lucide.createIcons() })
+}
+
+function switchTutorialTab(btn, tabId) {
+    document.querySelectorAll('.tutorial-tab').forEach(t => t.classList.remove('active'))
+    document.querySelectorAll('.tutorial-tab-panel').forEach(p => p.classList.remove('active'))
+    btn.classList.add('active')
+    const panel = document.getElementById(tabId)
+    if (panel) panel.classList.add('active')
+}
+
+function closeTutorial() {
+    const modal = document.getElementById('tutorial-modal')
+    if (!modal) return
+    modal.classList.remove('visible')
+    setTimeout(() => modal.remove(), 200)
+}
+
+// ============================================================
+// TOAST NOTIFICATIONS
+// ============================================================
+
+function showToast(message, duration = 3000, type = 'default') {
+    const existing = document.getElementById('kmake-toast')
+    if (existing) existing.remove()
+
+    const toast = document.createElement('div')
+    toast.id = 'kmake-toast'
+    toast.className = `kmake-toast kmake-toast-${type}`
+    toast.textContent = message
+    document.body.appendChild(toast)
+
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => toast.classList.add('visible'))
+    })
+
+    setTimeout(() => {
+        toast.classList.remove('visible')
+        setTimeout(() => toast.remove(), 300)
+    }, duration)
+}
+
+// ============================================================
+// KEYBOARD SHORTCUT HELP BADGE (shown on first visit)
+// ============================================================
+
+(function initHints() {
+    const dismissed = localStorage.getItem('kmake-hint-dismissed')
+    if (dismissed) return
+
+    const hint = document.createElement('div')
+    hint.id = 'kmake-hint-badge'
+    hint.className = 'kmake-hint-badge'
+    hint.innerHTML = `<i data-lucide="lightbulb" style="width:14px;height:14px;flex-shrink:0"></i><span>New here? Click <b>Help</b> for a guide</span><button onclick="document.getElementById('kmake-hint-badge').remove();localStorage.setItem('kmake-hint-dismissed','1')"><i data-lucide="x" style="width:12px;height:12px"></i></button>`
+    document.addEventListener('DOMContentLoaded', () => {
+        const header = document.querySelector('.buttons-actions')
+        if (header) header.after(hint)
+        else document.body.appendChild(hint)
+        if (typeof lucide !== 'undefined') lucide.createIcons({ nodes: [hint] })
+    })
+    setTimeout(() => {
+        const el = document.getElementById('kmake-hint-badge')
+        if (el) { el.classList.add('fade-out'); setTimeout(() => el?.remove(), 400) }
+        localStorage.setItem('kmake-hint-dismissed', '1')
+    }, 8000)
+})()
+
+// ============================================================
+// AGENT USAGE HIGHLIGHT IN LYRICS TEXTAREA
+// ============================================================
+
+elem_lyricsInput.addEventListener('input', function () {
+    // Dynamically extract & keep metadata.agents in sync for prefix auto-detect
+    const lines = this.value.split('\n')
+    const detectedAgents = {}
+    lines.forEach(l => {
+        const d = extractAgentDeclaration(l.trim())
+        if (d) detectedAgents[d.alias] = { type: d.type, name: d.name, alias: d.alias }
+    })
+    if (Object.keys(detectedAgents).length > 0) {
+        // Merge without overwriting existing agents
+        Object.assign(metadata.agents, detectedAgents)
+    }
+})

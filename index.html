@@ -47,7 +47,10 @@
             <div class="buttons-actions">
                 <button id="file-drop">File</button>
                 <button id="preview-drop">Preview</button>
+                <button id="agents-drop" onclick="openAgentManager()">Agents</button>
+                <button id="metadata-drop" onclick="openMetadataEditor()">Metadata</button>
                 <button id="about-drop">About</button>
+                <button id="help-drop" onclick="openTutorial()">Help</button>
             </div>
         </div>
     </div>
@@ -83,35 +86,75 @@
         <div class="part part-sortable part-right">
             <div class="inner-part">
                 <div class="inner-part-title">
-                    <p>Selected word</p>
+                    <p>Properties</p>
                 </div>
                 <div class="inner-part-buttons buttons-top">
-                    <button onclick="unselect()">Unselect word</button>
+                    <button onclick="unselect()" id="unselect-btn" title="Clear selection">Unselect</button>
+                    <button id="properties-preview" class="preview-play-btn" title="Preview this word">▶ Play</button>
                 </div>
-                <div class="inner-part-content properties">
-                    <div class="properties-item">
-                        <p class="properties-title">Word</p>
-                        <div class="properties-content">
-                            <p id="properties-word"></p>
-                        </div>
+                <div class="inner-part-content properties" id="properties-panel">
+
+                    <!-- Empty state -->
+                    <div class="props-empty" id="props-empty">
+                        <div class="props-empty-icon"><i data-lucide="mouse-pointer-click"></i></div>
+                        <p>Click any word in the Sync panel to select it</p>
                     </div>
-                    <div class="properties-item">
-                        <p class="properties-title">Start (ms)</p>
-                        <div class="properties-content">
-                            <input type="number" id="properties-start" value="0" />
+
+                    <!-- Filled state (hidden until word selected) -->
+                    <div class="props-filled" id="props-filled" style="display:none">
+
+                        <!-- Word chip -->
+                        <div class="props-word-chip" id="props-word-chip">
+                            <span class="props-word-label">WORD</span>
+                            <span class="props-word-text" id="properties-word"></span>
                         </div>
-                    </div>
-                    <div class="properties-item">
-                        <p class="properties-title">Length (ms)</p>
-                        <div class="properties-content">
-                            <input type="number" id="properties-length" value="0" />
+
+                        <!-- Start time -->
+                        <div class="props-time-block">
+                            <div class="props-time-header">
+                                <span class="props-time-label">Start</span>
+                                <span class="props-time-display" id="props-start-display">0:00.000</span>
+                            </div>
+                            <div class="props-nudge-row">
+                                <button class="nudge-btn nudge-big-minus"  onclick="nudgeProperty('start', -100)" title="-100ms">−100</button>
+                                <button class="nudge-btn nudge-small-minus" onclick="nudgeProperty('start', -10)"  title="-10ms">−10</button>
+                                <input type="number" id="properties-start" class="props-raw-input" value="0" title="Raw ms value" />
+                                <button class="nudge-btn nudge-small-plus"  onclick="nudgeProperty('start', +10)"  title="+10ms">+10</button>
+                                <button class="nudge-btn nudge-big-plus"   onclick="nudgeProperty('start', +100)" title="+100ms">+100</button>
+                            </div>
+                            <button class="btn-sync-here" onclick="syncWordToCursor('start')" title="Set to current playback position">⏱ Sync to playhead</button>
                         </div>
-                    </div>
-                    <div class="properties-item">
-                        <p class="properties-title">Preview</p>
-                        <div class="properties-content">
-                            <button id="properties-preview">Play</button>
+
+                        <!-- Duration -->
+                        <div class="props-time-block">
+                            <div class="props-time-header">
+                                <span class="props-time-label">Duration</span>
+                                <span class="props-time-display" id="props-length-display">0:00.000</span>
+                            </div>
+                            <div class="props-nudge-row">
+                                <button class="nudge-btn nudge-big-minus"  onclick="nudgeProperty('length', -100)" title="-100ms">−100</button>
+                                <button class="nudge-btn nudge-small-minus" onclick="nudgeProperty('length', -10)"  title="-10ms">−10</button>
+                                <input type="number" id="properties-length" class="props-raw-input" value="0" title="Raw ms value" />
+                                <button class="nudge-btn nudge-small-plus"  onclick="nudgeProperty('length', +10)"  title="+10ms">+10</button>
+                                <button class="nudge-btn nudge-big-plus"   onclick="nudgeProperty('length', +100)" title="+100ms">+100</button>
+                            </div>
                         </div>
+
+                        <!-- Divider -->
+                        <div class="props-divider"></div>
+
+                        <!-- Selected line -->
+                        <div class="props-section-label">SELECTED LINE</div>
+                        <div class="props-line-chip" id="props-line-chip">
+                            <span class="props-line-text" id="properties-line-text">—</span>
+                        </div>
+
+                        <div class="props-agent-row">
+                            <span class="props-time-label">Singer</span>
+                            <select id="properties-line-agent" onchange="changeSelectedLineAgent(this.value)" class="props-agent-select">
+                            </select>
+                        </div>
+
                     </div>
                 </div>
             </div>
