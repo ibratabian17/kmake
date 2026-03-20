@@ -43,14 +43,12 @@
     <div id="header">
         <div class="header-content">
             <img src="assets/kmake-logo.png" class="logo" />
-
+            <span class="header-divider"></span>
             <div class="buttons-actions">
-                <button id="file-drop">File</button>
-                <button id="preview-drop">Preview</button>
-                <button id="agents-drop" onclick="openAgentManager()">Agents</button>
-                <button id="metadata-drop" onclick="openMetadataEditor()">Metadata</button>
-                <button id="about-drop">About</button>
-                <button id="help-drop" onclick="openTutorial()">Help</button>
+                <button id="menu-file">File</button>
+                <button id="menu-song">Song</button>
+                <button id="menu-view">View</button>
+                <button id="menu-help">Help</button>
             </div>
         </div>
     </div>
@@ -158,30 +156,7 @@
                     </div>
                 </div>
             </div>
-            <div class="inner-part part-preview">
-                <div class="inner-part-title">
-                    <p>Preview mode</p>
-                </div>
-                <div class="inner-part-content properties">
-                    <div class="properties-item">
-                        <p class="properties-title">Enable preview mode</p>
-                        <div class="properties-content">
-                            <input type="checkbox" id="preview-checkbox" onchange="previewToggle()" />
-                        </div>
-                    </div>
-                    <div class="properties-item">
-                        <p class="properties-title">Preview theme</p>
-                        <div class="properties-content">
-                            <select id="preview-theme">
-                                <option value="default">Default</option>
-                                <option value="jd2014">jd2014</option>
-                                <option value="spotify">spotify</option>
-                                <option value="karafun">karafun</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
+
         </div>
     </div>
 

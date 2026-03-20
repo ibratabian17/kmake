@@ -254,17 +254,21 @@ function importYoutube() {
         fetch(`https://noembed.com/embed?url=${url}`)
             .then(response => response.json())
             .then(data => {
-                document.getElementById('music-title').innerText = data.title || "YouTube Video";
-                document.getElementById('music-artist').innerText = data.author_name || "YouTube";
-                document.getElementById('music-album').innerText = "YouTube";
-                if (data.thumbnail_url) {
-                    document.getElementById('music-album-art').src = data.thumbnail_url;
-                }
+                const title = data.title || "YouTube Video"
+                const artist = data.author_name || "YouTube"
+                document.getElementById('music-title').innerText = title
+                document.getElementById('music-artist').innerText = artist
+                document.getElementById('music-album').innerText = "YouTube"
+                if (data.thumbnail_url) document.getElementById('music-album-art').src = data.thumbnail_url
+                metadata.title = metadata.title || title
+                metadata.artist = metadata.artist || artist
+                metadata.album = metadata.album || "YouTube"
+                metadata.source = metadata.source || url
             })
             .catch(err => {
-                console.error("Could not fetch YouTube metadata", err);
-                document.getElementById('music-title').innerText = "YouTube Video";
-            });
+                console.error("Could not fetch YouTube metadata", err)
+                document.getElementById('music-title').innerText = "YouTube Video"
+            })
 
         if (!importedJSON) {
             currentLyrics = [];
@@ -908,30 +912,38 @@ function previewToggle() {
 }
 
 document.getElementById('preview-theme')?.addEventListener('change', () => {
-    document.getElementById('lyrics-content').setAttribute('data-theme', document.getElementById('preview-theme').value)
+    const sel = document.getElementById('preview-theme')
+    if (sel) document.getElementById('lyrics-content').setAttribute('data-theme', sel.value)
 })
+
+function _recomputeSongPartTimeline() {
+    const partFirstTime = {}, partLastEnd = {}
+    tempLyrics.forEach(line => {
+        if (line.isTaggedLine) return
+        const pi = line.element?.songPartIndex
+        if (pi == null || pi < 0) return
+        const s = line.time || 0
+        if (!s && !line.duration) return
+        if (partFirstTime[pi] == null || s < partFirstTime[pi]) partFirstTime[pi] = s
+        const e = s + (line.duration || 0)
+        if (partLastEnd[pi] == null || e > partLastEnd[pi]) partLastEnd[pi] = e
+    })
+    const totalMs = (player.duration || 0) * 1000
+    metadata.songParts.forEach((part, i) => {
+        const start = partFirstTime[i]; if (start == null) return
+        part.time = Math.round(start)
+        let nextStart = null
+        for (let j = i + 1; j < metadata.songParts.length; j++) {
+            if (partFirstTime[j] != null) { nextStart = partFirstTime[j]; break }
+        }
+        part.duration = Math.round(Math.max(0, nextStart != null ? nextStart - start : (partLastEnd[i] != null ? partLastEnd[i] : (totalMs || start)) - start))
+    })
+}
 
 function prepareNewKpoeJSON(cleanTiming = true) {
     if (!tempLyrics || tempLyrics.length === 0) return new Blob(['{}'], { type: 'application/json' })
 
-    // 1. Recompute songParts time/duration from first/last synced line of each section
-    const partFirstTime = {}
-    const partLastEnd = {}
-    tempLyrics.forEach(line => {
-        if (line.isTaggedLine || !line.time) return
-        const pi = line.element?.songPartIndex
-        if (pi == null || pi < 0) return
-        if (partFirstTime[pi] == null || line.time < partFirstTime[pi]) partFirstTime[pi] = line.time
-        const end = line.time + line.duration
-        if (partLastEnd[pi] == null || end > partLastEnd[pi]) partLastEnd[pi] = end
-    })
-
-    metadata.songParts.forEach((part, i) => {
-        if (partFirstTime[i] != null) {
-            part.time = partFirstTime[i]
-            part.duration = (partLastEnd[i] || part.time) - part.time
-        }
-    })
+    _recomputeSongPartTimeline()
 
     // 2. Set total duration
     const durMs = (player.duration || 0) * 1000
@@ -998,7 +1010,7 @@ function prepareNewKpoeJSON(cleanTiming = true) {
 
 function prepareLegacyJSON(cleanTiming = true) {
     if (!tempLyrics || tempLyrics.length === 0) return new Blob(['{}'], { type: 'application/json' })
-
+    _recomputeSongPartTimeline()
     const durMs = (player.duration || 0) * 1000
     const tMin = Math.floor(durMs / 60000)
     const tSec = ((durMs % 60000) / 1000).toFixed(3)
@@ -1274,10 +1286,15 @@ elem_musicInput.addEventListener('change', function () {
 
     jsmediatags.read(file, {
         onSuccess: function (tag) {
-            document.getElementById('music-title').innerText = tag.tags.title || "Unknown Title"
-            document.getElementById('music-artist').innerText = tag.tags.artist || "Unknown Artist"
-            document.getElementById('music-album').innerText = tag.tags.album || "Unknown Album"
-
+            const title = tag.tags.title || "Unknown Title"
+            const artist = tag.tags.artist || "Unknown Artist"
+            const album = tag.tags.album || "Unknown Album"
+            document.getElementById('music-title').innerText = title
+            document.getElementById('music-artist').innerText = artist
+            document.getElementById('music-album').innerText = album
+            metadata.title = metadata.title || title
+            metadata.artist = metadata.artist || artist
+            metadata.album = metadata.album || album
             if (tag.tags.picture) {
                 const data = tag.tags.picture.data
                 const format = tag.tags.picture.format
@@ -1286,7 +1303,6 @@ elem_musicInput.addEventListener('change', function () {
             } else {
                 document.getElementById('music-album-art').src = ''
             }
-
             if (tag.tags["TXXX"] && tag.tags["TXXX"].description === "Writer") {
                 metadata.songWriters = tag.tags["TXXX"].split(',').map(s => s.trim())
             } else {
@@ -1385,20 +1401,8 @@ window.addEventListener('load', function () {
 })
 
 if (typeof tippy !== 'undefined') {
-    tippy('#file-drop', {
-        content: `
-            <div id="file-dropdown" class="dropdown-content">
-                <button onclick="reset()">New</button>
-                <button onclick="importKMAKE()">Open</button>
-                <button onclick="exportKMAKE()">Save as</button>
-            </div>
-            <div id="export-dropdown" class="dropdown-content">
-                <button onclick="exportNewKpoeJSON()" id="json-button">Export as JSON</button>
-                <button onclick="exportLegacyJSON()" id="legacy-json-button">Export as Just Dance KTAPE</button>
-                <button onclick="exportLRC()" id="lrc-button">Export as LRC</button>
-                <button onclick="exportELRC()" id="elrc-button">Export as eLRC</button>
-            </div>
-        `,
+
+    const menuOptions = {
         allowHTML: true,
         trigger: 'click',
         interactive: true,
@@ -1406,55 +1410,129 @@ if (typeof tippy !== 'undefined') {
         arrow: false,
         theme: 'kmake-dropdown',
         placement: 'bottom-start',
+        offset: [0, 2],
+    }
+
+    function menuHooks(id) {
+        return {
+            onShow() { document.getElementById(id)?.setAttribute('data-active', 'true') },
+            onHide() { document.getElementById(id)?.removeAttribute('data-active') },
+        }
+    }
+
+    //  File 
+    tippy('#menu-file', {
+        ...menuOptions,
+        ...menuHooks('menu-file'),
+        content: `
+        <div class="dropdown-content">
+            <button onclick="reset()">
+                <i data-lucide="file-plus" class="menu-icon"></i> New
+            </button>
+            <button onclick="importKMAKE()">
+                <i data-lucide="folder-open" class="menu-icon"></i> Open…
+            </button>
+            <button onclick="exportKMAKE()">
+                <i data-lucide="save" class="menu-icon"></i> Save as .kmake
+            </button>
+            <div class="dropdown-separator"></div>
+            <span class="dropdown-section">Import</span>
+            <button onclick="importJSON()">
+                <i data-lucide="file-code" class="menu-icon"></i> Import JSON
+            </button>
+            <div class="dropdown-separator"></div>
+            <span class="dropdown-section">Export</span>
+            <button onclick="exportNewKpoeJSON()">
+                <i data-lucide="braces" class="menu-icon"></i> Export JSON (v2)
+                <span class="menu-shortcut">Ctrl+E</span>
+            </button>
+            <button onclick="exportLegacyJSON()">
+                <i data-lucide="gamepad-2" class="menu-icon"></i> Export JDNow Lyrics
+            </button>
+            <button onclick="exportLRC()">
+                <i data-lucide="subtitles" class="menu-icon"></i> Export LRC
+            </button>
+            <button onclick="exportELRC()">
+                <i data-lucide="subtitles" class="menu-icon"></i> Export Enhanced LRC
+            </button>
+        </div>`,
+        onMount(instance) { lucide.createIcons({ nodes: [instance.popper] }) },
     })
 
-    tippy('#about-drop', {
+    //  Song 
+    tippy('#menu-song', {
+        ...menuOptions,
+        ...menuHooks('menu-song'),
         content: `
-            <div id="about-dropdown" class="dropdown-content">
-                <button>Kmake+</button>
-                <button>${AppVersion.customName}</button>
-                <button>V${AppVersion.version}</button>
-                <button onclick="window.open('https://github.com/ecnivtwelve/kmake')">Originally Created By ecnivtwelve</button>
-            </div>
-        `,
-        allowHTML: true,
-        trigger: 'click',
-        interactive: true,
-        animation: 'fade',
-        arrow: false,
-        theme: 'kmake-dropdown',
-        placement: 'bottom-start',
+        <div class="dropdown-content">
+            <button onclick="openAgentManager()">
+                <i data-lucide="users" class="menu-icon"></i> Agents…
+            </button>
+            <button onclick="openMetadataEditor()">
+                <i data-lucide="music" class="menu-icon"></i> Metadata…
+            </button>
+            <div class="dropdown-separator"></div>
+            <button onclick="importSong()">
+                <i data-lucide="upload" class="menu-icon"></i> Load Audio File…
+            </button>
+            <button onclick="importYoutube()">
+                <i data-lucide="youtube" class="menu-icon"></i> Load from YouTube…
+            </button>
+            <div class="dropdown-separator"></div>
+            <button onclick="reset()">
+                <i data-lucide="rotate-ccw" class="menu-icon"></i> Reset All
+            </button>
+        </div>`,
+        onMount(instance) { lucide.createIcons({ nodes: [instance.popper] }) },
     })
 
-    tippy('#preview-drop', {
+    //  View 
+    tippy('#menu-view', {
+        ...menuOptions,
         content: `
-            <div id="preview-dropdown" class="dropdown-content">
-                <div class="properties-item">
-                    <p class="properties-title">Enable preview mode</p>
-                    <div class="properties-content">
-                        <input type="checkbox" id="preview-checkbox" onchange="previewToggle()"/>
-                    </div>
-                </div>
-                <div class="properties-item">
-                    <p class="properties-title">Preview theme</p>
-                    <div class="properties-content">
-                        <select id="preview-theme">
-                            <option value="default">Default</option>
-                            <option value="jd2014">jd2014</option>
-                            <option value="spotify">spotify</option>
-                            <option value="karafun">karafun</option>
-                        </select>
-                    </div>
-                </div>
+        <div class="dropdown-content">
+            <label class="dropdown-toggle" onclick="previewToggle(); document.getElementById('preview-checkbox').checked = document.getElementById('lyrics-content').classList.contains('preview')">
+                <input type="checkbox" id="preview-checkbox" onclick="event.stopPropagation(); previewToggle()" />
+                Preview mode
+            </label>
+            <div class="dropdown-select-row">
+                <span>Theme</span>
+                <select id="preview-theme" onchange="document.getElementById('lyrics-content').setAttribute('data-theme', this.value)">
+                    <option value="default">Default</option>
+                    <option value="jd2014">jd2014</option>
+                    <option value="spotify">Spotify</option>
+                    <option value="karafun">Karafun</option>
+                </select>
             </div>
-        `,
-        allowHTML: true,
-        trigger: 'click',
-        interactive: true,
-        animation: 'fade',
-        arrow: false,
-        theme: 'kmake-dropdown',
-        placement: 'bottom-start',
+        </div>`,
+        onShow(instance) {
+            document.getElementById('menu-view')?.setAttribute('data-active', 'true')
+            requestAnimationFrame(() => {
+                const cb = document.getElementById('preview-checkbox')
+                if (cb) cb.checked = document.getElementById('lyrics-content')?.classList.contains('preview') ?? false
+            })
+        },
+        onHide() { document.getElementById('menu-view')?.removeAttribute('data-active') },
+    })
+
+    //  Help 
+    tippy('#menu-help', {
+        ...menuOptions,
+        ...menuHooks('menu-help'),
+        content: `
+        <div class="dropdown-content">
+            <button onclick="openTutorial()">
+                <i data-lucide="book-open" class="menu-icon"></i> Tutorial &amp; Shortcuts
+            </button>
+            <div class="dropdown-separator"></div>
+            <button onclick="openAboutModal()">
+                <i data-lucide="info" class="menu-icon"></i> About Kmake
+            </button>
+            <button onclick="window.open('https://github.com/ibratabian17/kmake')">
+                <i data-lucide="github" class="menu-icon"></i> GitHub Repository
+            </button>
+        </div>`,
+        onMount(instance) { lucide.createIcons({ nodes: [instance.popper] }) },
     })
 }
 // ============================================================
@@ -1523,7 +1601,6 @@ function changeSelectedLineAgent(newAlias) {
     const oldAlias = line.element.singer || 'v1'
     line.element.singer = newAlias
 
-    // Also update the plaintext textarea to reflect singer change
     const textLines = elem_lyricsInput.value.split('\n')
     let lineCounter = 0
     for (let i = 0; i < textLines.length; i++) {
@@ -1670,7 +1747,6 @@ function updateAgentDeclarationsInText() {
             : `[agent:${agent.type}=${agent.alias}]`
     )
 
-    // Drop leading empty lines from content before rejoining
     let contentStart = 0
     while (contentStart < nonAgentLines.length && nonAgentLines[contentStart].trim() === '') contentStart++
 
@@ -1679,6 +1755,51 @@ function updateAgentDeclarationsInText() {
 
 function closeAgentManager() {
     const modal = document.getElementById('agent-manager-modal')
+    if (!modal) return
+    modal.classList.remove('visible')
+    setTimeout(() => modal.remove(), 200)
+}
+
+// ============================================================
+// ABOUT MODAL
+// ============================================================
+
+function openAboutModal() {
+    const existing = document.getElementById('about-modal')
+    if (existing) existing.remove()
+    const modal = document.createElement('div')
+    modal.id = 'about-modal'
+    modal.className = 'kmake-modal'
+    modal.innerHTML = `
+        <div class="kmake-modal-backdrop" onclick="closeAboutModal()"></div>
+        <div class="kmake-modal-content" style="max-width:360px">
+            <div class="kmake-modal-header">
+                <i data-lucide="info" class="modal-header-icon"></i>
+                <h2>About Kmake</h2>
+                <button onclick="closeAboutModal()" class="modal-close-btn"><i data-lucide="x"></i></button>
+            </div>
+            <div class="kmake-modal-body" style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:24px;text-align:center">
+                <img src="assets/kmake-logo.png" style="height:32px;opacity:0.9" />
+                <div style="display:flex;flex-direction:column;gap:3px">
+                    <p style="font-size:0.92rem;font-weight:600;color:var(--md-sys-color-on-surface)">Kmake — JSON Lyrics Generator</p>
+                    <p style="font-size:0.76rem;color:var(--md-sys-color-on-surface-variant)">${AppVersion.customName} &nbsp;·&nbsp; v${AppVersion.version}</p>
+                </div>
+                <div style="width:100%;height:1px;background:var(--md-sys-color-outline-variant)"></div>
+                <div style="display:flex;flex-direction:column;gap:4px">
+                    <p style="font-size:0.8rem;color:var(--md-sys-color-on-surface-variant)">Originally by <b style="color:var(--md-sys-color-on-surface)">ecnivtwelve</b></p>
+                    <p style="font-size:0.76rem;color:var(--md-sys-color-on-surface-variant);opacity:0.6">Fork maintained by Ibratabian17</p>
+                </div>
+                <button onclick="window.open('https://github.com/ecnivtwelve/kmake')" class="btn-secondary" style="display:flex;align-items:center;gap:6px">
+                    <i data-lucide="github" style="width:13px;height:13px"></i> View on GitHub
+                </button>
+            </div>
+        </div>`
+    document.body.appendChild(modal)
+    requestAnimationFrame(() => { modal.classList.add('visible'); lucide.createIcons() })
+}
+
+function closeAboutModal() {
+    const modal = document.getElementById('about-modal')
     if (!modal) return
     modal.classList.remove('visible')
     setTimeout(() => modal.remove(), 200)
@@ -1856,7 +1977,7 @@ This is the second line</div>
 [agent:group=v2:The Band]
 [agent:virtual=v3]</div>
                         <p>Types: <code>person</code> &nbsp;|&nbsp; <code>group</code> &nbsp;|&nbsp; <code>virtual</code> &nbsp;|&nbsp; <code>other</code></p>
-                        <p class="tip">Use the <b>Agents</b> button to manage this visually instead of typing!</p>
+                        <p class="tip">💡 Agent name is <b>optional</b> — <code>[agent:person=v1]</code> is valid. Use <b>Song → Agents</b> to manage this visually!</p>
                     </div>
                     <div class="syntax-section">
                         <h3>Assign Lines to Singers</h3>
@@ -1876,9 +1997,11 @@ v1:Chorus line here</div>
                     </div>
                     <div class="syntax-section">
                         <h3>Syllable Splitting</h3>
-                        <p>Use <code>]</code> or <code>-</code> to split words into individually-timed syllables:</p>
+                        <p>Use <code>]</code> to split a word into syllables. Use <code>-</code> only for hyphenated words where the dash belongs in the word:</p>
                         <div class="code-block">v1:Beau]ti]ful
-v1:A-ma-zing</div>
+v1:A-ma-zing
+v1:Makan-makan</div>
+                        <p class="tip">Both create separate timing slots. Prefer <code>]</code> for normal splits.</p>
                     </div>
                     <div class="syntax-section">
                         <h3>Full Example</h3>
@@ -1991,7 +2114,6 @@ function showToast(message, duration = 3000, type = 'default') {
 // ============================================================
 
 elem_lyricsInput.addEventListener('input', function () {
-    // Dynamically extract & keep metadata.agents in sync for prefix auto-detect
     const lines = this.value.split('\n')
     const detectedAgents = {}
     lines.forEach(l => {
@@ -1999,7 +2121,6 @@ elem_lyricsInput.addEventListener('input', function () {
         if (d) detectedAgents[d.alias] = { type: d.type, name: d.name, alias: d.alias }
     })
     if (Object.keys(detectedAgents).length > 0) {
-        // Merge without overwriting existing agents
         Object.assign(metadata.agents, detectedAgents)
     }
 })

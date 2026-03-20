@@ -105,82 +105,86 @@ body {
     overflow: hidden;
 }
 
-/* Header (Title Bar Area) */
+/* Header (Title Bar / Menu Bar) */
 #header {
-    width: 100%;
-    /* M3 Top App Bar (Small) is often 64px, Compact can be 48-56px */
-    height: env(titlebar-area-height, 56px);
-    padding: 0 16px; /* M3 standard horizontal padding */
-    display: flex;
-    align-items: center;
-    justify-content: space-between; /* This will push logo and actions apart */
     position: fixed;
     left: env(titlebar-area-x, 0);
     top: env(titlebar-area-y, 0);
     width: env(titlebar-area-width, 100%);
+    height: env(titlebar-area-height, 48px);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    background-color: var(--md-sys-color-surface-container);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
     -webkit-app-region: drag;
     app-region: drag;
     z-index: 99;
-    background-color: var(--md-sys-color-surface-container); /* Or var(--md-sys-color-surface) */
-    /* Add a subtle bottom border to distinguish from content that might scroll underneath */
-    border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
 
 .header-content {
-    width: 100%;
     display: flex;
     align-items: center;
-    justify-content: center;
+    width: 100%;
 }
 
 .header-content .logo {
-    height: 24px;
+    height: 22px;
     pointer-events: none;
+    flex-shrink: 0;
+}
+
+.header-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--md-sys-color-outline-variant);
+    flex-shrink: 0;
+    margin: 0 8px;
 }
 
 #header .buttons-actions {
-    margin-left: 16px;
-    padding-left: 16px;
-    border-left: 1px solid var(--md-sys-color-outline-variant);
     display: flex;
-    gap: 8px !important;
+    align-items: center;
+    gap: 1px;
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
 }
 
 #header .buttons-actions button {
+    -webkit-app-region: no-drag !important;
+    app-region: no-drag !important;
     background: transparent;
     border: none;
     outline: none;
     color: var(--md-sys-color-on-surface-variant);
-    border-radius: 0px;
-    font-size: var(--md-sys-typescale-label-large-font-size);
-    font-weight: var(--md-sys-typescale-label-large-font-weight);
-    padding: 12px 12px;
-    /* border-radius: var(--md-sys-shape-corner-full); */
-    /* height: 32px; */
-    -webkit-app-region: no-drag !important;
-    app-region: no-drag !important;
-    /* padding: 1em; */
+    font-size: 0.8125rem;
+    font-weight: 400;
+    padding: 4px 10px;
+    height: 30px;
+    border-radius: 5px;
     cursor: pointer;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.1s, color 0.1s;
+    white-space: nowrap;
+    line-height: 1;
+    letter-spacing: 0.01em;
 }
 
 #header .buttons-actions button:hover {
-    background-color: rgba(var(--md-sys-color-on-surface-variant-rgb), 0.08);
+    background-color: rgba(var(--md-sys-color-on-surface-variant-rgb), 0.12);
+    color: var(--md-sys-color-on-surface);
 }
 
-#header .buttons-actions button:active {
-    background-color: rgba(var(--md-sys-color-on-surface-variant-rgb), 0.12);
+#header .buttons-actions button[data-active="true"] {
+    background-color: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
 }
 
 /* Main Application Area */
 #app {
-    --appHeight: calc(100% - 10px * 2);
-    /* Original arbitrary height, check if still needed */
     padding-top: env(titlebar-area-height, 48px);
-    padding-bottom: 14px;
-    /* Original */
+    padding-bottom: var(--music-player-minimized-height);
     width: 100vw;
-    height: var(--appHeight);
+    height: 100vh;
     display: flex;
     overflow: hidden;
     box-sizing: border-box;
@@ -189,7 +193,6 @@ body {
 /* Side Panels */
 .part {
     width: 100%;
-    height: calc(100% - 16px * 2);
     /* Using M3 spacing */
     display: flex;
     flex-direction: column;
@@ -860,55 +863,154 @@ button.enabled:hover {
 */
 
 
-/* Dropdown / Tippy Menu Styling */
-.dropdown-content {
-    /* M3 Menu style */
-    display: flex;
-    flex-direction: column;
-    background: var(--md-sys-color-surface-container);
-    border: none;
-    border-radius: var(--md-sys-shape-corner-extra-small);
-    box-shadow: 0 2px 6px 2px rgba(0, 0, 0, 0.15), 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-    /* M3 Elevation 2 */
-    gap: 0px;
-    padding: 8px 0;
-    /* Vertical padding for the menu itself */
-    width: 150px;
-    /* Original width, or use min-content/auto */
+/* ============================================================
+   DROPDOWN MENUS
+   ============================================================ */
+
+.tippy-box[data-theme~='kmake-dropdown'] {
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+}
+
+.tippy-box[data-theme~='kmake-dropdown'] > .tippy-content {
+    padding: 5px 0;
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 8px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.25);
+    min-width: 192px;
     overflow: hidden;
 }
 
+.dropdown-content {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Normal menu item button */
 .dropdown-content button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     background: transparent;
     border: none;
     color: var(--md-sys-color-on-surface);
-    padding: 8px 12px;
-    /* M3 Menu item padding */
+    padding: 5px 12px 5px 10px;
     cursor: pointer;
     text-align: left;
-    font-size: var(--md-sys-typescale-body-medium-font-size);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    width: 100%;
+    min-height: 28px;
     border-radius: 0;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.08s;
+    white-space: nowrap;
+}
+
+.dropdown-content button .menu-icon {
+    width: 14px;
+    height: 14px;
+    opacity: 0.6;
+    flex-shrink: 0;
+}
+
+.dropdown-content button .menu-shortcut {
+    margin-left: auto;
+    font-size: 0.72rem;
+    opacity: 0.45;
+    padding-left: 16px;
 }
 
 .dropdown-content button:hover {
-    background-color: rgba(var(--md-sys-color-on-surface-rgb), 0.08);
+    background-color: rgba(var(--md-sys-color-primary-rgb), 0.15);
+    color: var(--md-sys-color-on-surface);
 }
 
-.tippy-box[data-theme~='kmake-dropdown'] {
-    margin-top: 4px;
-    /* Adjust spacing */
-    background-color: transparent;
-    /* Tippy box is wrapper, style dropdown-content */
-    box-shadow: none;
-    border-radius: var(--md-sys-shape-corner-extra-small);
+.dropdown-content button:active {
+    background-color: rgba(var(--md-sys-color-primary-rgb), 0.22);
 }
 
-.tippy-box[data-theme~='kmake-dropdown'] .tippy-content {
-    padding: 0;
-    width: min-content;
-    /* Let content dictate width */
-    border-radius: var(--md-sys-shape-corner-extra-small);
+.dropdown-content button:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+}
+
+/* Thin separator line */
+.dropdown-separator {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.07);
+    margin: 4px 0;
+}
+
+/* Section header label */
+.dropdown-section {
+    font-size: 0.67rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--md-sys-color-on-surface-variant);
+    padding: 8px 10px 3px;
+    pointer-events: none;
+    opacity: 0.55;
+}
+
+/* Toggle row (checkbox + label) */
+.dropdown-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px 5px 10px;
+    min-height: 28px;
+    cursor: pointer;
+    font-size: 0.8125rem;
+    color: var(--md-sys-color-on-surface);
+    transition: background-color 0.08s;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.dropdown-toggle:hover {
+    background-color: rgba(var(--md-sys-color-primary-rgb), 0.15);
+}
+
+.dropdown-toggle input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--md-sys-color-primary);
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+/* Select row */
+.dropdown-select-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 10px;
+    min-height: 28px;
+    font-size: 0.8125rem;
+    color: var(--md-sys-color-on-surface);
+    gap: 12px;
+}
+
+.dropdown-select-row span {
+    opacity: 0.8;
+    white-space: nowrap;
+}
+
+.dropdown-select-row select {
+    background: var(--md-sys-color-surface-container-highest);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    color: var(--md-sys-color-on-surface);
+    border-radius: 4px;
+    font-size: 0.78rem;
+    padding: 2px 6px;
+    height: 22px;
+    outline: none;
+    cursor: pointer;
+    min-width: 90px;
 }
 
 .plyr iframe, .plyr__video-wrapper {
