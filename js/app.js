@@ -182,6 +182,8 @@ function reset() {
     filename = ''
     selectedWordIndex = -1
     played_word = ''
+    metadataEverOpened = false
+    _pendingExportFn = null
 
     metadata = {
         source: "",
@@ -740,7 +742,30 @@ function parseLyrics() {
 
     tempLyrics = newLyrics
     buildAllSyllables()
+    _recalcMissingDurations()
     _seekToFirstUnsynced()
+}
+
+function _recalcMissingDurations() {
+    for (let i = 0; i < allSyllables.length - 1; i++) {
+        const entry = allSyllables[i]
+        const nextEntry = allSyllables[i + 1]
+        if (entry.isEndOfLine || nextEntry.isEndOfLine) continue
+        const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
+        const nextSyl = tempLyrics[nextEntry.lineIdx]?.syllabus[nextEntry.syllabusIdx]
+        if (syl && nextSyl && syl.isDone && syl.duration === 0 && nextSyl.isDone && nextSyl.time > syl.time) {
+            syl.duration = nextSyl.time - syl.time
+            if (syl.element) syl.element.style.setProperty('--duration', syl.duration + 'ms')
+        }
+    }
+    tempLyrics.forEach(line => {
+        if (line.isTaggedLine || !line.syllabus || !line.syllabus.length) return
+        const firstDone = line.syllabus.find(s => s.isDone)
+        const lastDone = [...line.syllabus].reverse().find(s => s.isDone)
+        if (firstDone && lastDone && firstDone.time > 0) {
+            line.duration = (lastDone.time + lastDone.duration) - firstDone.time
+        }
+    })
 }
 
 function nextWord() {
@@ -929,15 +954,43 @@ function _recomputeSongPartTimeline() {
         if (partLastEnd[pi] == null || e > partLastEnd[pi]) partLastEnd[pi] = e
     })
     const totalMs = (player.duration || 0) * 1000
+
+    // Pass 1 — assign raw start times and durations
     metadata.songParts.forEach((part, i) => {
-        const start = partFirstTime[i]; if (start == null) return
+        const start = partFirstTime[i]
+        if (start == null) { part.time = 0; part.duration = 0; return }
         part.time = Math.round(start)
         let nextStart = null
         for (let j = i + 1; j < metadata.songParts.length; j++) {
             if (partFirstTime[j] != null) { nextStart = partFirstTime[j]; break }
         }
-        part.duration = Math.round(Math.max(0, nextStart != null ? nextStart - start : (partLastEnd[i] != null ? partLastEnd[i] : (totalMs || start)) - start))
+        if (nextStart != null) {
+            part.duration = Math.round(Math.max(0, nextStart - start))
+        } else {
+            const contentEnd = partLastEnd[i] != null ? partLastEnd[i] : start
+            const clampedEnd = totalMs > 0 ? Math.min(contentEnd, totalMs) : contentEnd
+            part.duration = Math.round(Math.max(0, clampedEnd - start))
+        }
     })
+
+    // Pass 2 — anti-overlap clamp
+    for (let i = 0; i < metadata.songParts.length - 1; i++) {
+        const cur = metadata.songParts[i]
+        const next = metadata.songParts[i + 1]
+        if (!cur.time && !cur.duration) continue
+        if (!next.time && !next.duration) continue
+        const curEnd = cur.time + cur.duration
+        if (curEnd > next.time) cur.duration = Math.max(0, next.time - cur.time)
+    }
+
+    // Pass 3 — clamp every part to song duration
+    if (totalMs > 0) {
+        metadata.songParts.forEach(part => {
+            if (!part.time && !part.duration) return
+            if (part.time + part.duration > totalMs) part.duration = Math.max(0, totalMs - part.time)
+            if (part.time > totalMs) { part.time = totalMs; part.duration = 0 }
+        })
+    }
 }
 
 function prepareNewKpoeJSON(cleanTiming = true) {
@@ -1094,11 +1147,13 @@ function prepareELRC() {
 }
 
 function exportNewKpoeJSON() {
-    downloadBlob(prepareNewKpoeJSON())
+    if (!metadataEverOpened) { openMetadataEditor(() => exportNewKpoeJSON()); return }
+    _runExport(() => downloadBlob(prepareNewKpoeJSON()))
 }
 
 function exportLegacyJSON() {
-    downloadBlob(prepareLegacyJSON())
+    if (!metadataEverOpened) { openMetadataEditor(() => exportLegacyJSON()); return }
+    _runExport(() => downloadBlob(prepareLegacyJSON()))
 }
 
 function exportJSON() {
@@ -1106,11 +1161,13 @@ function exportJSON() {
 }
 
 function exportLRC() {
-    downloadBlob(prepareLRC(), 'lrc')
+    if (!metadataEverOpened) { openMetadataEditor(() => exportLRC()); return }
+    _runExport(() => downloadBlob(prepareLRC(), 'lrc'))
 }
 
 function exportELRC() {
-    downloadBlob(prepareELRC(), 'lrc')
+    if (!metadataEverOpened) { openMetadataEditor(() => exportELRC()); return }
+    _runExport(() => downloadBlob(prepareELRC(), 'lrc'))
 }
 
 function downloadBlob(blob, format = 'json') {
@@ -1123,19 +1180,14 @@ function downloadBlob(blob, format = 'json') {
 }
 
 function exportKMAKE() {
-    if (!music_file) {
-        alert('Please import a music file first.')
-        return
-    }
-
-    var zip = new JSZip()
-    zip.file("audiofile.kmakefile", music_file)
-    let jsonLyrics = prepareNewKpoeJSON(false)  // full v2 RAM state, no cleanTiming strip
-    zip.file("lyrics.kmakefile", jsonLyrics)
-
-    const options = { type: 'blob', mimeType: 'application/kmake' }
-    zip.generateAsync(options).then(function (content) {
-        downloadBlob(content, 'kmake')
+    if (!music_file) { alert('Please import a music file first.'); return }
+    if (!metadataEverOpened) { openMetadataEditor(() => exportKMAKE()); return }
+    _runExport(() => {
+        var zip = new JSZip()
+        zip.file("audiofile.kmakefile", music_file)
+        zip.file("lyrics.kmakefile", prepareNewKpoeJSON(false))
+        zip.generateAsync({ type: 'blob', mimeType: 'application/kmake' })
+            .then(content => downloadBlob(content, 'kmake'))
     })
 }
 
@@ -1809,7 +1861,71 @@ function closeAboutModal() {
 // METADATA EDITOR
 // ============================================================
 
-function openMetadataEditor() {
+// ============================================================
+// LANGUAGE DETECTION  (Google Translate public detect endpoint)
+let metadataEverOpened = false
+let _pendingExportFn = null
+
+async function detectLanguage() {
+    const lines = elem_lyricsInput.value.split('\n')
+    const sortedAliases = Object.keys(metadata.agents).sort((a, b) => b.length - a.length)
+    const plainLines = lines
+        .map(l => l.trim())
+        .filter(t => t && !isValidTag(t) && !extractAgentDeclaration(t))
+        .map(t => {
+            for (const alias of sortedAliases) {
+                if (t.startsWith(alias + ':')) return t.slice(alias.length + 1).trim()
+            }
+            return t
+        })
+        .map(t => t.replace(/\]/g, ''))
+    const sample = plainLines.slice(0, 12).join(' ').substring(0, 400).trim()
+    if (!sample) return null
+    const res = await fetch(
+        'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q='
+        + encodeURIComponent(sample)
+    )
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    const data = await res.json()
+    return (Array.isArray(data) && data[2]) ? data[2] : null
+}
+
+async function detectAndFillLanguage() {
+    const btn = document.getElementById('btn-detect-lang')
+    const input = document.getElementById('meta-language')
+    if (btn) { btn.disabled = true; btn.textContent = 'Detecting…' }
+    try {
+        const lang = await detectLanguage()
+        if (lang) {
+            if (input) input.value = lang
+            showToast('Detected language: ' + lang)
+        } else {
+            showToast('Could not detect — add more lyrics first', 3500, 'error')
+        }
+    } catch {
+        showToast('Detection failed — check connection', 3500, 'error')
+    } finally {
+        if (btn) {
+            btn.disabled = false
+            btn.innerHTML = '<i data-lucide="scan-text" style="width:13px;height:13px"></i> Detect'
+            if (typeof lucide !== 'undefined') lucide.createIcons({ nodes: [btn] })
+        }
+    }
+}
+
+async function _runExport(exportFn) {
+    if (!metadata.language) {
+        try {
+            const lang = await detectLanguage()
+            if (lang) metadata.language = lang
+        } catch { /* best-effort */ }
+    }
+    exportFn()
+}
+
+function openMetadataEditor(exportCallback = null) {
+    metadataEverOpened = true
+    _pendingExportFn = exportCallback
     const existing = document.getElementById('metadata-modal')
     if (existing) existing.remove()
 
@@ -1852,7 +1968,12 @@ function openMetadataEditor() {
                 <div class="meta-row">
                     <div class="meta-field">
                         <label>Language</label>
-                        <input type="text" id="meta-language" value="${escapeHtmlAttr(metadata.language || '')}" placeholder="en, ja, ko…" />
+                        <div style="display:flex;gap:6px;align-items:center">
+                            <input type="text" id="meta-language" value="${escapeHtmlAttr(metadata.language || '')}" placeholder="en, ja, ko…" style="flex:1;min-width:0" />
+                            <button id="btn-detect-lang" onclick="detectAndFillLanguage()" class="btn-secondary" title="Auto-detect from lyrics text" style="white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:4px">
+                                <i data-lucide="scan-text" style="width:13px;height:13px"></i> Detect
+                            </button>
+                        </div>
                     </div>
                     <div class="meta-field">
                         <label>ISRC</label>
@@ -1865,7 +1986,7 @@ function openMetadataEditor() {
                 </div>
             </div>
             <div class="kmake-modal-footer">
-                <button onclick="saveMetadata()" class="btn-primary">Save</button>
+                <button onclick="saveMetadata()" class="btn-primary">${exportCallback ? 'Save & Export' : 'Save'}</button>
                 <button onclick="closeMetadataEditor()" class="btn-secondary">Cancel</button>
             </div>
         </div>
@@ -1883,8 +2004,10 @@ function saveMetadata() {
     metadata.curator = document.getElementById('meta-curator').value.trim() || 'Kmake'
     const writersRaw = document.getElementById('meta-writers').value.trim()
     metadata.songWriters = writersRaw ? writersRaw.split(',').map(s => s.trim()).filter(Boolean) : []
+    const cb = _pendingExportFn
+    _pendingExportFn = null
     closeMetadataEditor()
-    showToast('Metadata saved')
+    if (cb) { cb() } else { showToast('Metadata saved') }
 }
 
 function closeMetadataEditor() {
