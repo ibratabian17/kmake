@@ -585,7 +585,9 @@ function _seekToFirstUnsynced() {
     for (let i = 0; i < allSyllables.length; i++) {
         const entry = allSyllables[i]
         if (entry.isEndOfLine) continue
-        if (!tempLyrics[entry.lineIdx].syllabus[entry.syllabusIdx].isDone) {
+        const syl = tempLyrics[entry.lineIdx].syllabus[entry.syllabusIdx]
+        if (syl.isBackground) continue   // skip background syllables
+        if (!syl.isDone) {
             currentWordIndex = i
             break
         }
@@ -695,20 +697,48 @@ function parseLyrics() {
         const words = splitTextWithSeparators(actualLineText)
         const syllabus = words.map(w => ({ time: 0, duration: 0, text: w, isDone: false, element: null }))
 
-        // Consume old timing in order so duplicate lines don't steal each other's timing
         const _key = cleanText(actualLineText)
         const _pool = oldLineMap.get(_key)
         const _consumed = oldLineConsumed.get(_key) || 0
         const oldLine = _pool ? _pool[_consumed] : null
         if (_pool && _consumed < _pool.length) oldLineConsumed.set(_key, _consumed + 1)
         if (oldLine && oldLine.syllabus) {
-            oldLine.syllabus.forEach((oldSyl, si) => {
-                if (si < syllabus.length && oldSyl.isDone) {
-                    syllabus[si].time = oldSyl.time
-                    syllabus[si].duration = oldSyl.duration
-                    syllabus[si].isDone = oldSyl.isDone
+            const oldSyls = oldLine.syllabus
+            const O = oldSyls.length
+            const N = syllabus.length
+
+            const dp = Array.from({ length: O + 1 }, () => new Array(N + 1).fill(0))
+            for (let oi = 1; oi <= O; oi++) {
+                for (let ni = 1; ni <= N; ni++) {
+                    if (cleanText(oldSyls[oi - 1].text) === cleanText(syllabus[ni - 1].text)) {
+                        dp[oi][ni] = dp[oi - 1][ni - 1] + 1
+                    } else {
+                        dp[oi][ni] = Math.max(dp[oi - 1][ni], dp[oi][ni - 1])
+                    }
                 }
-            })
+            }
+
+            let oi = O, ni = N
+            const matches = []
+            while (oi > 0 && ni > 0) {
+                if (cleanText(oldSyls[oi - 1].text) === cleanText(syllabus[ni - 1].text)) {
+                    matches.push([oi - 1, ni - 1])
+                    oi--; ni--
+                } else if (dp[oi - 1][ni] >= dp[oi][ni - 1]) {
+                    oi--
+                } else {
+                    ni--
+                }
+            }
+
+            for (const [oldIdx, newIdx] of matches) {
+                const oldSyl = oldSyls[oldIdx]
+                if (oldSyl.isDone) {
+                    syllabus[newIdx].time = oldSyl.time
+                    syllabus[newIdx].duration = oldSyl.duration
+                    syllabus[newIdx].isDone = oldSyl.isDone
+                }
+            }
         }
 
         const lineText = words.join('')
@@ -760,11 +790,12 @@ function _recalcMissingDurations() {
     }
     tempLyrics.forEach(line => {
         if (line.isTaggedLine || !line.syllabus || !line.syllabus.length) return
-        const firstDone = line.syllabus.find(s => s.isDone)
-        const lastDone = [...line.syllabus].reverse().find(s => s.isDone)
-        if (firstDone && lastDone && firstDone.time > 0) {
-            line.duration = (lastDone.time + lastDone.duration) - firstDone.time
-        }
+        const doneSyls = line.syllabus.filter(s => s.isDone && s.time > 0)
+        if (doneSyls.length === 0) return
+        const earliestTime = Math.min(...doneSyls.map(s => s.time))
+        const latestEnd = Math.max(...doneSyls.map(s => s.time + s.duration))
+        line.time = earliestTime
+        line.duration = latestEnd - earliestTime
     })
 }
 
@@ -828,10 +859,19 @@ function nextWord() {
     syl.isDone = true
     syl.duration = 0
 
-    if (syllabusIdx === 0) line.time = time
-    const lastSyl = line.syllabus[line.syllabus.length - 1]
-    if (lastSyl.time > 0) {
-        line.duration = (lastSyl.time + lastSyl.duration) - line.time
+    // line.time = earliest stamped syllable time
+    const doneSyls = line.syllabus.filter(s => s.isDone && s.time > 0)
+    if (doneSyls.length > 0) {
+        line.time = Math.min(...doneSyls.map(s => s.time))
+    } else {
+        line.time = time
+    }
+    // line.duration = latest syllable's (time + duration) - line.time
+    const latestSyl = doneSyls.reduce((best, s) => {
+        return (s.time + s.duration) > (best.time + best.duration) ? s : best
+    }, doneSyls[0] || syl)
+    if (latestSyl && latestSyl.time > 0) {
+        line.duration = (latestSyl.time + latestSyl.duration) - line.time
     }
 
     if (syl.element) {
