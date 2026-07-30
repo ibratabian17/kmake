@@ -781,6 +781,11 @@ button.enabled:hover {
     /* Original style */
 }
 
+.background-word {
+    font-style: italic;
+    opacity: 0.7;
+}
+
 /* END OF PRESERVED LYRICS PREVIEW SECTION */
 
 
@@ -1216,6 +1221,47 @@ button.enabled:hover {
     color: var(--md-sys-color-on-surface);
     font-family: 'Fira Mono', monospace;
     word-break: break-all;
+}
+
+/* Word actions row: split / merge / background toggle */
+.props-word-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.btn-word-action {
+    flex: 1;
+    min-width: 0;
+    background: var(--md-sys-color-surface-container-highest);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    color: var(--md-sys-color-on-surface-variant);
+    border-radius: 8px;
+    padding: 6px 8px;
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.12s, color 0.12s, opacity 0.12s;
+}
+
+.btn-word-action:hover:not(:disabled) {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-color: transparent;
+}
+
+.btn-word-action:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.btn-word-action.active {
+    background: var(--md-sys-color-tertiary-container, var(--md-sys-color-primary-container));
+    color: var(--md-sys-color-on-tertiary-container, var(--md-sys-color-on-primary-container));
+    border-color: transparent;
 }
 
 /* Time block */

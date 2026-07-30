@@ -23,7 +23,7 @@ let metadata = {
     curator: "Kmake"
 }
 const AppVersion = {
-    version: '2.0-kmakeEditor',
+    version: '2.1-kmakeEditor',
     customName: 'Ibratabian17\'s Fork'
 }
 
@@ -346,7 +346,11 @@ function parseNewKpoeFormat(jsonData) {
     const meta = jsonData.metadata || {}
     metadata.source = meta.source || ''
     metadata.title = meta.title || ''
+    metadata.artist = meta.artist || ''
+    metadata.album = meta.album || ''
     metadata.language = meta.language || ''
+    metadata.isrc = meta.isrc || ''
+    metadata.curator = meta.curator || 'Kmake'
     metadata.songWriters = meta.songWriters || []
     metadata.agents = meta.agents || { v1: { type: 'person', name: '', alias: 'v1' } }
     metadata.songParts = meta.songParts || []
@@ -394,6 +398,7 @@ function parseNewKpoeFormat(jsonData) {
             duration: s.duration || 0,
             text: s.text || '',
             isDone: (s.time || 0) > 0,
+            isBackground: !!s.isBackground,
             element: null
         }))
 
@@ -499,6 +504,7 @@ function parseLegacyToV2(jsonData) {
             duration: w.duration || 0,
             text: (w.displayText || w.text || '').replace(/]/g, ''),
             isDone: (w.time || 0) > 0,
+            isBackground: !!w.isBackground,
             element: null
         }))
 
@@ -555,6 +561,7 @@ function rebuildLyricsDOM() {
             p.appendChild(span)
             elem_lyricsContent.appendChild(p)
             line.lineElement = p
+            lineDisplayIdx++
             return
         }
 
@@ -567,6 +574,7 @@ function rebuildLyricsDOM() {
                 span.innerText = syl.text
                 span.id = 'syl-' + li + '-' + si
                 if (isRTL(syl.text)) span.classList.add('rtl-word')
+                if (syl.isBackground) span.classList.add('background-word')
                 if (syl.isDone) {
                     span.classList.add('done-word')
                     span.style.setProperty('--duration', syl.duration + 'ms')
@@ -656,6 +664,7 @@ function parseLyrics() {
                 isTaggedLine: true, tag: null, lineIndex: lineIndex, lineElement: p
             })
             elem_lyricsContent.appendChild(p)
+            lineDisplayIdx++
             return
         }
 
@@ -676,6 +685,7 @@ function parseLyrics() {
                 isTaggedLine: true, tag: currentTag, lineIndex: lineIndex, lineElement: p
             })
             elem_lyricsContent.appendChild(p)
+            lineDisplayIdx++
             return
         }
 
@@ -695,7 +705,7 @@ function parseLyrics() {
         }
 
         const words = splitTextWithSeparators(actualLineText)
-        const syllabus = words.map(w => ({ time: 0, duration: 0, text: w, isDone: false, element: null }))
+        const syllabus = words.map(w => ({ time: 0, duration: 0, text: w, isDone: false, isBackground: false, element: null }))
 
         const _key = cleanText(actualLineText)
         const _pool = oldLineMap.get(_key)
@@ -737,6 +747,7 @@ function parseLyrics() {
                     syllabus[newIdx].time = oldSyl.time
                     syllabus[newIdx].duration = oldSyl.duration
                     syllabus[newIdx].isDone = oldSyl.isDone
+                    syllabus[newIdx].isBackground = !!oldSyl.isBackground
                 }
             }
         }
@@ -753,6 +764,7 @@ function parseLyrics() {
             span.id = 'syl-' + lineIndex + '-' + si
             if (syl.text.trim() === '') span.classList.add('lyrics-space')
             if (isRTL(syl.text)) span.classList.add('rtl-word')
+            if (syl.isBackground) span.classList.add('background-word')
             if (syl.isDone) {
                 span.classList.add('done-word')
                 span.style.setProperty('--duration', syl.duration + 'ms')
@@ -927,6 +939,8 @@ function openWord(wordIndex) {
     const filled = document.getElementById('props-filled')
     if (empty) empty.style.display = 'none'
     if (filled) filled.style.display = 'flex'
+
+    refreshWordActionButtons()
 }
 
 function unselect() {
@@ -940,6 +954,138 @@ function unselect() {
     const filled = document.getElementById('props-filled')
     if (empty) empty.style.display = 'flex'
     if (filled) filled.style.display = 'none'
+    refreshWordActionButtons()
+}
+
+function _resyncAfterStructuralChange(lineIdx, syllabusIdx) {
+    rebuildLyricsDOM()
+    buildAllSyllables()
+    const line = tempLyrics[lineIdx]
+    if (line && line.syllabus && line.syllabus[syllabusIdx] !== undefined) {
+        const idx = allSyllables.findIndex(a => a.lineIdx === lineIdx && a.syllabusIdx === syllabusIdx)
+        if (idx !== -1) { openWord(idx); return }
+    }
+    unselect()
+}
+
+function _syllableHasOpenParen(text) {
+    return /\(/.test(text || '')
+}
+function _syllableHasCloseParen(text) {
+    return /\)/.test(text || '')
+}
+
+function _findEdgeParenRun(syllabus, syllabusIdx) {
+    if (!syllabus || !syllabus.length) return null
+    const n = syllabus.length
+
+    if (syllabus[0] && _syllableHasOpenParen(syllabus[0].text)) {
+        let end = -1
+        for (let i = 0; i < n; i++) {
+            if (_syllableHasCloseParen(syllabus[i].text)) { end = i; break }
+        }
+        if (end !== -1 && syllabusIdx >= 0 && syllabusIdx <= end) {
+            return { startIdx: 0, endIdx: end }
+        }
+    }
+
+    if (syllabus[n - 1] && _syllableHasCloseParen(syllabus[n - 1].text)) {
+        let start = -1
+        for (let i = n - 1; i >= 0; i--) {
+            if (_syllableHasOpenParen(syllabus[i].text)) { start = i; break }
+        }
+        if (start !== -1 && syllabusIdx >= start && syllabusIdx <= n - 1) {
+            return { startIdx: start, endIdx: n - 1 }
+        }
+    }
+
+    return null
+}
+
+function _lineHasBackgroundRun(line, excludingRange) {
+    return (line.syllabus || []).some((s, i) => {
+        if (excludingRange && i >= excludingRange.startIdx && i <= excludingRange.endIdx) return false
+        return !!s.isBackground
+    })
+}
+
+function _getBackgroundActionForSelection() {
+    if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) {
+        return { mode: 'blocked', reason: 'No word selected' }
+    }
+    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
+    const line = tempLyrics[lineIdx]
+    if (!line) return { mode: 'blocked', reason: 'No word selected' }
+    const syl = line.syllabus[syllabusIdx]
+    if (!syl) return { mode: 'blocked', reason: 'No word selected' }
+
+    if (syl.isBackground) {
+        let start = syllabusIdx, end = syllabusIdx
+        while (start > 0 && line.syllabus[start - 1].isBackground) start--
+        while (end < line.syllabus.length - 1 && line.syllabus[end + 1].isBackground) end++
+        return { mode: 'unmark', run: { startIdx: start, endIdx: end } }
+    }
+
+    const run = _findEdgeParenRun(line.syllabus, syllabusIdx)
+    if (!run) {
+        return { mode: 'blocked', reason: 'Only a "(...)" sentence at the start or end of the line can be marked' }
+    }
+    if (_lineHasBackgroundRun(line, run)) {
+        return { mode: 'blocked', reason: 'This line already has a background vocal section' }
+    }
+    return { mode: 'mark', run }
+}
+
+function refreshWordActionButtons() {
+    const btn = document.getElementById('btn-toggle-background')
+    if (!btn) return
+
+    if (selectedWordIndex === -1) {
+        btn.disabled = true
+        btn.classList.remove('active')
+        btn.textContent = 'Mark background'
+        return
+    }
+
+    const action = _getBackgroundActionForSelection()
+    if (action.mode === 'mark') {
+        btn.disabled = false
+        btn.classList.remove('active')
+        btn.textContent = 'Mark background'
+        btn.title = 'Mark this parenthesized sentence as background vocal'
+    } else if (action.mode === 'unmark') {
+        btn.disabled = false
+        btn.classList.add('active')
+        btn.textContent = 'Unmark background'
+        btn.title = 'Remove background vocal marking'
+    } else {
+        btn.disabled = true
+        btn.classList.remove('active')
+        btn.textContent = 'Mark background'
+        btn.title = action.reason || ''
+    }
+}
+
+function toggleBackgroundVocal() {
+    if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
+    const { lineIdx } = allSyllables[selectedWordIndex]
+    const line = tempLyrics[lineIdx]
+    if (!line) return
+
+    const action = _getBackgroundActionForSelection()
+    if (action.mode === 'blocked') {
+        if (action.reason) showToast(action.reason, 3000, 'error')
+        return
+    }
+
+    const { startIdx, endIdx } = action.run
+    for (let i = startIdx; i <= endIdx; i++) {
+        line.syllabus[i].isBackground = (action.mode === 'mark')
+    }
+
+    const selSyl = allSyllables[selectedWordIndex]
+    _resyncAfterStructuralChange(selSyl.lineIdx, selSyl.syllabusIdx)
+    showToast(action.mode === 'mark' ? 'Marked as background vocal' : 'Background vocal unmarked')
 }
 
 function isRTL(s) {
@@ -1056,11 +1202,15 @@ function prepareNewKpoeJSON(cleanTiming = true) {
             // Clean and filter syllables first
             const cleanedSyllables = (line.syllabus || [])
                 .filter(s => !cleanTiming || (s.text || '').replace(/\]/g, '').trim() !== '')
-                .map(s => ({
-                    time: Math.round(s.time || 0),
-                    duration: Math.round(s.duration || 0),
-                    text: (s.text || '').replace(/\]/g, '')
-                }));
+                .map(s => {
+                    const out = {
+                        time: Math.round(s.time || 0),
+                        duration: Math.round(s.duration || 0),
+                        text: (s.text || '').replace(/\]/g, '')
+                    };
+                    if (s.isBackground) out.isBackground = true;
+                    return out;
+                });
 
             let actualLineDuration = Math.round(line.duration || 0);
             if (cleanedSyllables.length > 0) {
@@ -1092,7 +1242,11 @@ function prepareNewKpoeJSON(cleanTiming = true) {
             source: metadata.source,
             songWriters: metadata.songWriters,
             title: metadata.title,
+            artist: metadata.artist || '',
+            album: metadata.album || '',
             language: metadata.language,
+            isrc: metadata.isrc || '',
+            curator: metadata.curator || 'Kmake',
             agents: metadata.agents,
             songParts: metadata.songParts,
             totalDuration: metadata.totalDuration
@@ -1129,13 +1283,15 @@ function prepareLegacyJSON(cleanTiming = true) {
         });
 
         activeSyllables.forEach((syl, si) => {
-            exportedWords.push({
+            const word = {
                 time: Math.round(syl.time || 0),
                 duration: Math.round(syl.duration || 0),
                 text: (syl.text || '').replace(/\]/g, ''),
                 isLineEnding: si === activeSyllables.length - 1 ? 1 : 0,
                 element: { key, songPart: partName, singer }
-            })
+            }
+            if (syl.isBackground) word.isBackground = true
+            exportedWords.push(word)
         })
     })
 
@@ -1396,7 +1552,7 @@ elem_musicInput.addEventListener('change', function () {
                 document.getElementById('music-album-art').src = ''
             }
             if (tag.tags["TXXX"] && tag.tags["TXXX"].description === "Writer") {
-                metadata.songWriters = tag.tags["TXXX"].split(',').map(s => s.trim())
+                metadata.songWriters = (tag.tags["TXXX"].data || '').split(',').map(s => s.trim()).filter(Boolean)
             } else {
                 metadata.songWriters = []
             }
