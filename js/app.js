@@ -1,5 +1,22 @@
 const jsmediatags = window.jsmediatags
 
+function getSavedCurator() {
+    try {
+        return localStorage.getItem('kmake_curator') || 'Kmake'
+    } catch (e) {
+        return 'Kmake'
+    }
+}
+
+function saveCurator(val) {
+    try {
+        const clean = (val || '').trim() || 'Kmake'
+        localStorage.setItem('kmake_curator', clean)
+    } catch (e) {
+        console.warn('Could not save curator to localStorage', e)
+    }
+}
+
 let currentLyrics = []
 let tempLyrics = []         // array of line objects including tagged (section/agent) entries
 let allSyllables = []       // flat cursor array: [{ lineIdx, syllabusIdx }], tagged lines excluded
@@ -10,6 +27,7 @@ let importedJSON = false
 let filename = ''
 let selectedWordIndex = -1
 let played_word = ''
+let lastPlayedSylId = ''
 let music_file = null
 let isVisible = true
 let metadata = {
@@ -20,7 +38,7 @@ let metadata = {
     agents: { "v1": { type: "person", name: "", alias: "v1" } },
     songParts: [],
     totalDuration: "",
-    curator: "Kmake"
+    curator: getSavedCurator()
 }
 const AppVersion = {
     version: '2.1-kmakeEditor',
@@ -50,7 +68,7 @@ const player = new Plyr(elem_musicPlayer, {
     }
 })
 
-elem_showMenu.onclick = function () {
+function toggleMusicPlayer() {
     if (isVisible) {
         elem_navbar.setAttribute('visible', 'false')
         isVisible = false
@@ -59,6 +77,8 @@ elem_showMenu.onclick = function () {
         isVisible = true
     }
 }
+window.toggleMusicPlayer = toggleMusicPlayer
+if (elem_showMenu) elem_showMenu.onclick = toggleMusicPlayer
 
 for (let i = 0; i < elem_part_sortable.length; i++) {
     Sortable.create(elem_part_sortable[i], {
@@ -83,9 +103,10 @@ for (let i = 0; i < elem_part_sortable.length; i++) {
 }
 
 function msToTime(duration) {
-    let milliseconds = parseInt((duration % 1000) / 10)
-    let seconds = parseInt((duration / 1000) % 60)
-    let minutes = parseInt((duration / (1000 * 60)) % 60)
+    const total = Math.max(0, Math.round(duration || 0))
+    let milliseconds = Math.floor((total % 1000) / 10)
+    let seconds = Math.floor((total / 1000) % 60)
+    let minutes = Math.floor((total / (1000 * 60)) % 60)
 
     milliseconds = (milliseconds < 10) ? '0' + milliseconds : milliseconds
     seconds = (seconds < 10) ? '0' + seconds : seconds
@@ -182,6 +203,7 @@ function reset() {
     filename = ''
     selectedWordIndex = -1
     played_word = ''
+    lastPlayedSylId = ''
     metadataEverOpened = false
     _pendingExportFn = null
 
@@ -193,19 +215,25 @@ function reset() {
         agents: { "v1": { type: "person", name: "", alias: "v1" } },
         songParts: [],
         totalDuration: "",
-        curator: "Kmake"
+        curator: getSavedCurator()
     }
 
-    player.source = { type: 'audio', sources: [] }
+    if (player) player.source = { type: 'audio', sources: [] }
 
     elem_musicInput.value = ''
     elem_lyricsInput.value = ''
     elem_lyricsContent.innerHTML = ''
 
-    document.getElementById('music-title').innerText = ''
-    document.getElementById('music-artist').innerText = ''
-    document.getElementById('music-album').innerText = ''
-    document.getElementById('music-album-art').src = ''
+    const t = document.getElementById('music-title')
+    const a = document.getElementById('music-artist')
+    const al = document.getElementById('music-album')
+    const art = document.getElementById('music-album-art')
+    if (t) t.innerText = ''
+    if (a) a.innerText = ''
+    if (al) al.innerText = ''
+    if (art) art.src = ''
+
+    unselect()
 }
 
 // Rebuilds flat allSyllables cursor from tempLyrics. Must be called after any tempLyrics change.
@@ -236,7 +264,7 @@ function importYoutube() {
     const url = prompt("Enter YouTube URL:");
     if (!url) return;
 
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|shorts\/|watch\?v=|&v=)([^#&?]*).*/;
     const match = url.match(regExp);
 
     if (match && match[2].length === 11) {
@@ -278,8 +306,10 @@ function importYoutube() {
         }
 
         const plyCont = document.querySelector('.music-inner .plyr')
-        plyCont.classList.remove('plyr--video')
-        plyCont.classList.add('plyr--audio')
+        if (plyCont) {
+            plyCont.classList.remove('plyr--video')
+            plyCont.classList.add('plyr--audio')
+        }
 
         elem_navbar.setAttribute('visible', 'false');
         isVisible = false;
@@ -350,7 +380,7 @@ function parseNewKpoeFormat(jsonData) {
     metadata.album = meta.album || ''
     metadata.language = meta.language || ''
     metadata.isrc = meta.isrc || ''
-    metadata.curator = meta.curator || 'Kmake'
+    metadata.curator = meta.curator || getSavedCurator()
     metadata.songWriters = meta.songWriters || []
     metadata.agents = meta.agents || { v1: { type: 'person', name: '', alias: 'v1' } }
     metadata.songParts = meta.songParts || []
@@ -607,7 +637,15 @@ function cleanText(text) {
 }
 
 function parseLyrics() {
-    if (elem_lyricsInput.value.trim() === '') return
+    if (elem_lyricsInput.value.trim() === '') {
+        elem_lyricsContent.innerHTML = ''
+        tempLyrics = []
+        allSyllables = []
+        currentWordIndex = 0
+        lastWordIndex = 0
+        unselect()
+        return
+    }
 
     elem_lyricsContent.innerHTML = ''
 
@@ -899,7 +937,9 @@ function nextWord() {
 
 function openWord(wordIndex) {
     if (wordIndex < 0 || wordIndex >= allSyllables.length) return
-    const { lineIdx, syllabusIdx } = allSyllables[wordIndex]
+    const entry = allSyllables[wordIndex]
+    if (!entry || entry.isEndOfLine || entry.lineIdx < 0) return
+    const { lineIdx, syllabusIdx } = entry
     const line = tempLyrics[lineIdx]
     if (!line) return
     const syl = line.syllabus[syllabusIdx]
@@ -1068,7 +1108,9 @@ function refreshWordActionButtons() {
 
 function toggleBackgroundVocal() {
     if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
-    const { lineIdx } = allSyllables[selectedWordIndex]
+    const entry = allSyllables[selectedWordIndex]
+    if (!entry || entry.isEndOfLine || entry.lineIdx < 0) return
+    const { lineIdx } = entry
     const line = tempLyrics[lineIdx]
     if (!line) return
 
@@ -1431,14 +1473,6 @@ function importKMAKE() {
     input.click()
 }
 
-document.addEventListener('keydown', function (event) {
-    if (document.activeElement === elem_lyricsInput) return
-    if (event.keyCode === 13) {
-        event.preventDefault()
-        nextWord()
-    }
-})
-
 setInterval(() => {
     if (!tempLyrics || tempLyrics.length === 0) return
 
@@ -1453,6 +1487,7 @@ setInterval(() => {
     let currentSylRef = null
     for (let i = 0; i < allSyllables.length; i++) {
         const { lineIdx, syllabusIdx } = allSyllables[i]
+        if (lineIdx < 0) break
         const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
         if (!syl || !syl.isDone) break
         if ((syl.time || 0) > time) {
@@ -1471,9 +1506,10 @@ setInterval(() => {
         if (currentSyl?.element) currentSyl.element.classList.add('playing-word')
     }
 
-    const currentText = currentSyl?.text || ''
-    if (currentText === played_word) return
-    played_word = currentText
+    const sylId = currentSylRef ? `${currentSylRef.lineIdx}-${currentSylRef.syllabusIdx}` : ''
+    if (sylId === lastPlayedSylId) return
+    lastPlayedSylId = sylId
+    played_word = currentSyl?.text || ''
 
     const allSylElems = Array.from(document.querySelectorAll('.lyrics-word')).filter(el => el.id.startsWith('syl-'))
     const currentElem = currentSyl?.element
@@ -1572,20 +1608,84 @@ player.on('play', function () {
     goBackIndex = 0
 })
 
+function isTextInputActive(target = document.activeElement) {
+    if (!target) return false
+    const tag = target.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+    if (target.isContentEditable) return true
+    if (target.closest('.kmake-modal')) return true
+    return false
+}
+
 document.addEventListener('keydown', function (event) {
-    if (document.activeElement === elem_lyricsInput) return
+    // 1. Modal close on Escape
+    if (event.key === 'Escape' || event.keyCode === 27) {
+        if (document.getElementById('metadata-modal')) { closeMetadataEditor(); return }
+        if (document.getElementById('agent-manager-modal')) { closeAgentManager(); return }
+        if (document.getElementById('tutorial-modal')) { closeTutorial(); return }
+        if (document.getElementById('about-modal')) { closeAboutModal(); return }
+    }
+
+    // 2. Form submission inside open modals on Enter
+    if (event.keyCode === 13) {
+        if (document.getElementById('metadata-modal') && document.activeElement?.tagName === 'INPUT') {
+            event.preventDefault()
+            saveMetadata()
+            return
+        }
+        if (document.getElementById('agent-manager-modal') && document.activeElement?.tagName === 'INPUT') {
+            event.preventDefault()
+            saveAgents()
+            return
+        }
+    }
+
+    // 3. Global hotkeys (Ctrl/Cmd combos)
+    if (event.ctrlKey || event.metaKey) {
+        const key = event.key.toLowerCase()
+        if (key === 'e') {
+            event.preventDefault()
+            exportNewKpoeJSON()
+            return
+        }
+        if (key === 's') {
+            event.preventDefault()
+            exportKMAKE()
+            return
+        }
+        if (key === 'o') {
+            event.preventDefault()
+            importKMAKE()
+            return
+        }
+    }
+
+    // 4. If typing in any input/textarea/select/modal, do NOT intercept normal editing keys
+    if (isTextInputActive()) return
+
+    // 5. Space -> Play/Pause
     if (event.keyCode === 32) {
         if (document.activeElement.tagName === 'BUTTON' || document.activeElement === elem_musicPlayer) return
         playPause()
         event.preventDefault()
+        return
     }
-})
 
-document.addEventListener('keydown', function (event) {
-    if (document.activeElement === elem_lyricsInput) return
+    // 6. Enter -> Next Word
+    if (event.keyCode === 13) {
+        event.preventDefault()
+        nextWord()
+        return
+    }
 
-    if (event.keyCode === 37) goBackIndex -= 1
-    if (event.keyCode === 39) {
+    // 7. Arrow Left / Right -> Seek
+    if (event.keyCode === 37) { // Left
+        event.preventDefault()
+        if (currentWordIndex + goBackIndex > 0) {
+            goBackIndex -= 1
+        }
+    } else if (event.keyCode === 39) { // Right
+        event.preventDefault()
         goBackIndex += 1
         if (goBackIndex > 0) goBackIndex = 0
     }
@@ -1593,9 +1693,11 @@ document.addEventListener('keydown', function (event) {
     if (event.keyCode === 37 || event.keyCode === 39) {
         const targetIndex = currentWordIndex + goBackIndex
         if (targetIndex >= 0 && targetIndex < allSyllables.length) {
-            const { lineIdx, syllabusIdx } = allSyllables[targetIndex]
-            const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
-            if (syl && syl.time !== undefined) player.currentTime = syl.time / 1000
+            const entry = allSyllables[targetIndex]
+            if (entry && !entry.isEndOfLine && entry.lineIdx >= 0) {
+                const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
+                if (syl && syl.time !== undefined) player.currentTime = syl.time / 1000
+            }
         }
     }
 })
@@ -1614,39 +1716,72 @@ document.addEventListener('click', function (event) {
     }
 })
 
-document.getElementById('properties-start')?.addEventListener('input', function (event) {
+function onPropStartChange(event) {
     if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
-    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
-    const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+    const entry = allSyllables[selectedWordIndex]
+    if (!entry || entry.isEndOfLine || entry.lineIdx < 0) return
+    const { lineIdx, syllabusIdx } = entry
+    const line = tempLyrics[lineIdx]
+    const syl = line?.syllabus[syllabusIdx]
     if (!syl) return
     syl.time = Math.max(0, parseInt(event.target.value) || 0)
-    updateTimeDisplays()
-})
+    syl.isDone = true
+    if (syl.element) syl.element.classList.add('done-word')
 
-document.getElementById('properties-length')?.addEventListener('input', function (event) {
+    const doneSyls = (line.syllabus || []).filter(s => s.isDone && s.time > 0)
+    if (doneSyls.length > 0) {
+        line.time = Math.min(...doneSyls.map(s => s.time))
+        const maxEnd = Math.max(...doneSyls.map(s => s.time + s.duration))
+        line.duration = Math.max(0, maxEnd - line.time)
+    }
+    updateTimeDisplays()
+}
+const propStartEl = document.getElementById('properties-start')
+propStartEl?.addEventListener('input', onPropStartChange)
+propStartEl?.addEventListener('change', onPropStartChange)
+
+function onPropLengthChange(event) {
     if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
-    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
-    const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+    const entry = allSyllables[selectedWordIndex]
+    if (!entry || entry.isEndOfLine || entry.lineIdx < 0) return
+    const { lineIdx, syllabusIdx } = entry
+    const line = tempLyrics[lineIdx]
+    const syl = line?.syllabus[syllabusIdx]
     if (!syl) return
     syl.duration = Math.max(0, parseInt(event.target.value) || 0)
     if (syl.element) syl.element.style.setProperty('--duration', syl.duration + 'ms')
+
+    const doneSyls = (line.syllabus || []).filter(s => s.isDone && s.time > 0)
+    if (doneSyls.length > 0) {
+        const maxEnd = Math.max(...doneSyls.map(s => s.time + s.duration))
+        line.duration = Math.max(0, maxEnd - (line.time || 0))
+    }
     updateTimeDisplays()
-})
+}
+const propLenEl = document.getElementById('properties-length')
+propLenEl?.addEventListener('input', onPropLengthChange)
+propLenEl?.addEventListener('change', onPropLengthChange)
 
 document.getElementById('properties-preview')?.addEventListener('click', function (event) {
     if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
-    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
+    const entry = allSyllables[selectedWordIndex]
+    if (!entry || entry.isEndOfLine || entry.lineIdx < 0) return
+    const { lineIdx, syllabusIdx } = entry
     const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
     if (!syl) return
     player.currentTime = (syl.time || 0) / 1000
     player.play()
-    setTimeout(() => { player.pause() }, (syl.duration || 1000) + 300)
+    setTimeout(() => { player.pause() }, Math.max(500, (syl.duration || 1000) + 300))
 })
 
 window.addEventListener('load', function () {
     const loadingElement = document.getElementById('loading')
     if (loadingElement) loadingElement.style.display = 'none'
 })
+if (document.readyState === 'complete') {
+    const loadingElement = document.getElementById('loading')
+    if (loadingElement) loadingElement.style.display = 'none'
+}
 
 if (typeof tippy !== 'undefined') {
 
@@ -1806,8 +1941,11 @@ function updateTimeDisplays() {
 
 function nudgeProperty(field, delta) {
     if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
-    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
-    const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+    const entry = allSyllables[selectedWordIndex]
+    if (!entry || entry.isEndOfLine || entry.lineIdx < 0) return
+    const { lineIdx, syllabusIdx } = entry
+    const line = tempLyrics[lineIdx]
+    const syl = line?.syllabus[syllabusIdx]
     if (!syl) return
 
     const inputId = field === 'start' ? 'properties-start' : 'properties-length'
@@ -1819,17 +1957,31 @@ function nudgeProperty(field, delta) {
 
     if (field === 'start') {
         syl.time = newVal
+        syl.isDone = true
+        if (syl.element) syl.element.classList.add('done-word')
     } else {
         syl.duration = newVal
         if (syl.element) syl.element.style.setProperty('--duration', syl.duration + 'ms')
+    }
+
+    if (line) {
+        const doneSyls = (line.syllabus || []).filter(s => s.isDone && s.time > 0)
+        if (doneSyls.length > 0) {
+            line.time = Math.min(...doneSyls.map(s => s.time))
+            const maxEnd = Math.max(...doneSyls.map(s => s.time + s.duration))
+            line.duration = Math.max(0, maxEnd - line.time)
+        }
     }
     updateTimeDisplays()
 }
 
 function syncWordToCursor(field) {
     if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
-    const { lineIdx, syllabusIdx } = allSyllables[selectedWordIndex]
-    const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
+    const entry = allSyllables[selectedWordIndex]
+    if (!entry || entry.isEndOfLine || entry.lineIdx < 0) return
+    const { lineIdx, syllabusIdx } = entry
+    const line = tempLyrics[lineIdx]
+    const syl = line?.syllabus[syllabusIdx]
     if (!syl) return
     const timeMs = Math.round(player.currentTime * 1000)
     const input = document.getElementById('properties-start')
@@ -1837,36 +1989,47 @@ function syncWordToCursor(field) {
     syl.time = timeMs
     syl.isDone = true
     if (syl.element) syl.element.classList.add('done-word')
+
+    if (line) {
+        const doneSyls = (line.syllabus || []).filter(s => s.isDone && s.time > 0)
+        if (doneSyls.length > 0) {
+            line.time = Math.min(...doneSyls.map(s => s.time))
+            const maxEnd = Math.max(...doneSyls.map(s => s.time + s.duration))
+            line.duration = Math.max(0, maxEnd - line.time)
+        }
+    }
+
     updateTimeDisplays()
     showToast(`Synced to ${msToDisplayTime(timeMs)}`)
 }
 
 function changeSelectedLineAgent(newAlias) {
     if (selectedWordIndex === -1 || selectedWordIndex >= allSyllables.length) return
-    const { lineIdx } = allSyllables[selectedWordIndex]
+    const entry = allSyllables[selectedWordIndex]
+    if (!entry || entry.isEndOfLine || entry.lineIdx < 0) return
+    const { lineIdx } = entry
     const line = tempLyrics[lineIdx]
     if (!line || !line.element) return
     const oldAlias = line.element.singer || 'v1'
     line.element.singer = newAlias
 
     const textLines = elem_lyricsInput.value.split('\n')
-    let lineCounter = 0
-    for (let i = 0; i < textLines.length; i++) {
-        const t = textLines[i].trim()
-        if (extractAgentDeclaration(t) || isValidTag(t)) continue
-        if (lineCounter === line.lineIndex) {
-            const prefixRe = new RegExp(`^\\s*${oldAlias}:`)
-            if (prefixRe.test(textLines[i])) {
-                textLines[i] = textLines[i].replace(prefixRe, newAlias + ':')
+    if (line.lineIndex >= 0 && line.lineIndex < textLines.length) {
+        const currentLineText = textLines[line.lineIndex]
+        const prefixRe = new RegExp(`^\\s*${oldAlias}:`)
+        if (prefixRe.test(currentLineText)) {
+            textLines[line.lineIndex] = currentLineText.replace(prefixRe, newAlias + ':')
+        } else {
+            const anyPrefixRe = /^\s*[a-zA-Z0-9_-]+:/
+            if (anyPrefixRe.test(currentLineText)) {
+                textLines[line.lineIndex] = currentLineText.replace(anyPrefixRe, newAlias + ':')
             } else {
-                textLines[i] = newAlias + ':' + textLines[i]
+                textLines[line.lineIndex] = newAlias + ':' + currentLineText
             }
-            break
         }
-        lineCounter++
+        elem_lyricsInput.value = textLines.join('\n')
+        showToast(`Line reassigned to ${newAlias}`)
     }
-    elem_lyricsInput.value = textLines.join('\n')
-    showToast(`Line reassigned to ${newAlias}`)
 }
 
 // ============================================================
@@ -1968,6 +2131,10 @@ function saveAgents() {
     })
 
     if (hasError) return
+    if (Object.keys(newAgents).length === 0) {
+        showToast('At least one agent is required', 3000, 'error')
+        return
+    }
 
     const oldAliases = new Set(Object.keys(metadata.agents))
     const removedAliases = [...oldAliases].filter(a => !newAgents[a])
@@ -2178,7 +2345,7 @@ function openMetadataEditor(exportCallback = null) {
                 </div>
                 <div class="meta-field">
                     <label>Curator</label>
-                    <input type="text" id="meta-curator" value="${escapeHtmlAttr(metadata.curator || 'Kmake')}" placeholder="Kmake" />
+                    <input type="text" id="meta-curator" value="${escapeHtmlAttr(metadata.curator || getSavedCurator())}" placeholder="${escapeHtmlAttr(getSavedCurator())}" />
                 </div>
             </div>
             <div class="kmake-modal-footer">
@@ -2197,9 +2364,26 @@ function saveMetadata() {
     metadata.album = document.getElementById('meta-album').value.trim()
     metadata.language = document.getElementById('meta-language').value.trim()
     metadata.isrc = document.getElementById('meta-isrc').value.trim()
-    metadata.curator = document.getElementById('meta-curator').value.trim() || 'Kmake'
+    const curatorInput = document.getElementById('meta-curator')
+    const curatorVal = curatorInput ? curatorInput.value.trim() : ''
+    metadata.curator = curatorVal || getSavedCurator()
+    saveCurator(metadata.curator)
+
     const writersRaw = document.getElementById('meta-writers').value.trim()
     metadata.songWriters = writersRaw ? writersRaw.split(',').map(s => s.trim()).filter(Boolean) : []
+
+    // Update player displays if elements exist
+    const musicTitleEl = document.getElementById('music-title')
+    const musicArtistEl = document.getElementById('music-artist')
+    const musicAlbumEl = document.getElementById('music-album')
+    if (musicTitleEl && metadata.title) musicTitleEl.innerText = metadata.title
+    if (musicArtistEl && metadata.artist) musicArtistEl.innerText = metadata.artist
+    if (musicAlbumEl && metadata.album) musicAlbumEl.innerText = metadata.album
+
+    if (!filename && metadata.title) {
+        filename = metadata.artist ? `${metadata.artist} - ${metadata.title}` : metadata.title
+    }
+
     const cb = _pendingExportFn
     _pendingExportFn = null
     closeMetadataEditor()
@@ -2415,12 +2599,17 @@ function showToast(message, duration = 3000, type = 'default') {
     hint.id = 'kmake-hint-badge'
     hint.className = 'kmake-hint-badge'
     hint.innerHTML = `<i data-lucide="lightbulb" style="width:14px;height:14px;flex-shrink:0"></i><span>New here? Click <b>Help</b> for a guide</span><button onclick="document.getElementById('kmake-hint-badge').remove();localStorage.setItem('kmake-hint-dismissed','1')"><i data-lucide="x" style="width:12px;height:12px"></i></button>`
-    document.addEventListener('DOMContentLoaded', () => {
+    function mountHint() {
         const header = document.querySelector('.buttons-actions')
         if (header) header.after(hint)
         else document.body.appendChild(hint)
         if (typeof lucide !== 'undefined') lucide.createIcons({ nodes: [hint] })
-    })
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', mountHint)
+    } else {
+        mountHint()
+    }
     setTimeout(() => {
         const el = document.getElementById('kmake-hint-badge')
         if (el) { el.classList.add('fade-out'); setTimeout(() => el?.remove(), 400) }
