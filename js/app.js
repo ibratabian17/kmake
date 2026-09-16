@@ -636,6 +636,95 @@ function cleanText(text) {
     return (text || '').replace(/[\]\-\s]/g, '').toLowerCase()
 }
 
+function calcLineSimilarity(textA, textB) {
+    const a = cleanText(textA)
+    const b = cleanText(textB)
+    if (a === b) return 1.0
+    if (!a || !b) return 0.0
+
+    const wordsA = textA.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    const wordsB = textB.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (wordsA.length === 0 || wordsB.length === 0) return 0.0
+
+    let common = 0
+    const pool = [...wordsB]
+    for (const w of wordsA) {
+        const idx = pool.indexOf(w)
+        if (idx !== -1) {
+            common++
+            pool.splice(idx, 1)
+        }
+    }
+    const tokenScore = (2.0 * common) / (wordsA.length + wordsB.length)
+    if (tokenScore > 0) return tokenScore
+
+    if (a.includes(b) || b.includes(a)) {
+        return Math.min(a.length, b.length) / Math.max(a.length, b.length)
+    }
+
+    const maxLen = Math.max(a.length, b.length)
+    if (maxLen > 0 && maxLen < 50) {
+        const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0))
+        for (let i = 1; i <= a.length; i++) {
+            for (let j = 1; j <= b.length; j++) {
+                if (a[i - 1] === b[j - 1]) dp[i][j] = dp[i - 1][j - 1] + 1
+                else dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
+            }
+        }
+        return (2.0 * dp[a.length][b.length]) / (a.length + b.length)
+    }
+
+    return 0.0
+}
+
+function alignLines(oldLines, newLines) {
+    const M = oldLines.length
+    const N = newLines.length
+    if (M === 0 || N === 0) return new Map()
+
+    const dp = Array.from({ length: M + 1 }, () => new Float64Array(N + 1))
+    const matchScores = Array.from({ length: M }, () => new Float64Array(N))
+
+    for (let i = 0; i < M; i++) {
+        for (let j = 0; j < N; j++) {
+            const sim = calcLineSimilarity(oldLines[i].text, newLines[j].actualLineText)
+            if (sim >= 0.2) {
+                const posDiff = Math.abs((M > 1 ? i / (M - 1) : 0) - (N > 1 ? j / (N - 1) : 0))
+                matchScores[i][j] = Math.max(0.01, sim - posDiff * 0.15)
+            } else {
+                matchScores[i][j] = -1
+            }
+        }
+    }
+
+    for (let i = 1; i <= M; i++) {
+        for (let j = 1; j <= N; j++) {
+            let best = Math.max(dp[i - 1][j], dp[i][j - 1])
+            const ms = matchScores[i - 1][j - 1]
+            if (ms > 0) {
+                best = Math.max(best, dp[i - 1][j - 1] + ms)
+            }
+            dp[i][j] = best
+        }
+    }
+
+    let i = M, j = N
+    const lineMatchMap = new Map()
+    while (i > 0 && j > 0) {
+        const ms = matchScores[i - 1][j - 1]
+        if (ms > 0 && Math.abs(dp[i][j] - (dp[i - 1][j - 1] + ms)) < 1e-6) {
+            lineMatchMap.set(j - 1, oldLines[i - 1])
+            i--
+            j--
+        } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+            i--
+        } else {
+            j--
+        }
+    }
+    return lineMatchMap
+}
+
 function parseLyrics() {
     if (elem_lyricsInput.value.trim() === '') {
         elem_lyricsContent.innerHTML = ''
@@ -649,16 +738,7 @@ function parseLyrics() {
 
     elem_lyricsContent.innerHTML = ''
 
-    // Per-key array so duplicate lines each restore their own timing in order
-    const oldLineMap = new Map()
-    tempLyrics.forEach(oldLine => {
-        if (!oldLine.isTaggedLine) {
-            const key = cleanText(oldLine.text)
-            if (!oldLineMap.has(key)) oldLineMap.set(key, [])
-            oldLineMap.get(key).push(oldLine)
-        }
-    })
-    const oldLineConsumed = new Map()
+    const oldLyricLines = tempLyrics.filter(l => !l.isTaggedLine)
 
     metadata.songParts = []
     // Each #Tag occurrence gets its own songParts entry — duplicates are intentional (grouping, not type)
@@ -669,15 +749,44 @@ function parseLyrics() {
     }
 
     const newLyrics = []
-    const lines = (elem_lyricsInput.value + '\n#ENDOFLINE').split('\n')
-    let lineDisplayIdx = 0
-    let currentTag = ''
-    let currentSongPartIndex = -1
+    const rawLines = (elem_lyricsInput.value + '\n#ENDOFLINE').split('\n')
 
-    lines.forEach((line, lineIndex) => {
+    // Pre-parse lines to separate tags from lyric lines for robust alignment
+    const parsedLinesInfo = rawLines.map((line, lineIndex) => {
         const trimmed = line.trim()
         const isSongPartTag = isValidTag(trimmed)
         const agentDecl = extractAgentDeclaration(trimmed)
+        if (agentDecl || isSongPartTag) {
+            return { lineIndex, line, trimmed, isTagOrAgent: true, agentDecl, isSongPartTag }
+        }
+
+        let lineSinger = 'v1'
+        let actualLineText = line
+
+        const sortedAliases = Object.keys(metadata.agents).sort((a, b) => b.length - a.length)
+        for (const alias of sortedAliases) {
+            if (actualLineText.trim().startsWith(alias + ':')) {
+                lineSinger = alias
+                const prefixMatch = actualLineText.match(new RegExp(`^\\s*${alias}:`))
+                if (prefixMatch) {
+                    actualLineText = actualLineText.substring(prefixMatch[0].length)
+                }
+                break
+            }
+        }
+        return { lineIndex, line, trimmed, isTagOrAgent: false, lineSinger, actualLineText }
+    })
+
+    const newLyricItems = parsedLinesInfo.filter(info => !info.isTagOrAgent)
+    const lineMatchMap = alignLines(oldLyricLines, newLyricItems)
+
+    let lineDisplayIdx = 0
+    let currentTag = ''
+    let currentSongPartIndex = -1
+    let lyricItemIdx = 0
+
+    parsedLinesInfo.forEach((info) => {
+        const { lineIndex, trimmed, isTagOrAgent, agentDecl, isSongPartTag, lineSinger, actualLineText } = info
 
         const p = document.createElement('p')
         p.classList.add('lyrics-line')
@@ -727,29 +836,12 @@ function parseLyrics() {
             return
         }
 
-        let lineSinger = 'v1'
-        let actualLineText = line
-
-        const sortedAliases = Object.keys(metadata.agents).sort((a, b) => b.length - a.length)
-        for (const alias of sortedAliases) {
-            if (actualLineText.trim().startsWith(alias + ':')) {
-                lineSinger = alias
-                const prefixMatch = actualLineText.match(new RegExp(`^\\s*${alias}:`))
-                if (prefixMatch) {
-                    actualLineText = actualLineText.substring(prefixMatch[0].length)
-                }
-                break
-            }
-        }
-
         const words = splitTextWithSeparators(actualLineText)
         const syllabus = words.map(w => ({ time: 0, duration: 0, text: w, isDone: false, isBackground: false, element: null }))
 
-        const _key = cleanText(actualLineText)
-        const _pool = oldLineMap.get(_key)
-        const _consumed = oldLineConsumed.get(_key) || 0
-        const oldLine = _pool ? _pool[_consumed] : null
-        if (_pool && _consumed < _pool.length) oldLineConsumed.set(_key, _consumed + 1)
+        const oldLine = lineMatchMap.get(lyricItemIdx) || null
+        lyricItemIdx++
+
         if (oldLine && oldLine.syllabus) {
             const oldSyls = oldLine.syllabus
             const O = oldSyls.length
