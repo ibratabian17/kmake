@@ -122,14 +122,19 @@ function splitTextWithSeparators(text) {
         return [text]
     }
 
-    const separatorRegex = /(\]|-)/
+    const separatorRegex = /(\]\]|\]|-)/
     const parts = text.split(separatorRegex)
     const words = []
 
     for (let i = 0; i < parts.length; i++) {
         const part = parts[i]
 
-        if (part === ']' || part === '-') {
+        if (part === ']]') {
+            if (words.length > 0 && !words[words.length - 1].endsWith(']') && !words[words.length - 1].endsWith('-')) {
+                words[words.length - 1] += ']'
+            }
+            words.push(']')
+        } else if (part === ']' || part === '-') {
             if (words.length > 0) {
                 words[words.length - 1] += part
             } else {
@@ -603,7 +608,7 @@ function rebuildLyricsDOM() {
                 span.classList.add('lyrics-word')
                 span.innerText = (syl.text || '').replace(/]/g, '')
                 span.id = 'syl-' + li + '-' + si
-                if (syl.text && syl.text.trim() === '') span.classList.add('lyrics-space')
+                if ((syl.text || '').replace(/]/g, '').trim() === '') span.classList.add('lyrics-space')
                 if (isRTL(syl.text)) span.classList.add('rtl-word')
                 if (syl.isBackground) span.classList.add('background-word')
                 if (syl.isDone) {
@@ -891,9 +896,9 @@ function parseLyrics() {
         syllabus.forEach((syl, si) => {
             const span = document.createElement('span')
             span.classList.add('lyrics-word')
-            span.innerText = syl.text.replace(/]/g, '')
+            span.innerText = (syl.text || '').replace(/]/g, '')
             span.id = 'syl-' + lineIndex + '-' + si
-            if (syl.text.trim() === '') span.classList.add('lyrics-space')
+            if ((syl.text || '').replace(/]/g, '').trim() === '') span.classList.add('lyrics-space')
             if (isRTL(syl.text)) span.classList.add('rtl-word')
             if (syl.isBackground) span.classList.add('background-word')
             if (syl.isDone) {
@@ -1465,10 +1470,11 @@ function prepareLRC() {
     let lrcContent = ''
     tempLyrics.forEach(line => {
         if (!line || line.isTaggedLine) return
-        const syllabus = line.syllabus || []
+        const syllabus = (line.syllabus || []).filter(s => (s.text || '').replace(/]/g, '').trim() !== '')
         if (!syllabus.length) return
         const lineTime = line.time || syllabus[0].time || 0
-        const lineText = syllabus.map(s => s.text).join('').trim()
+        const lineText = syllabus.map(s => (s.text || '').replace(/]/g, '')).join('').trim()
+        if (!lineText) return
         lrcContent += '[' + msToTime(lineTime) + ']' + lineText + '\n'
     })
     return new Blob([lrcContent.trim()], { type: 'text/plain' })
@@ -1480,15 +1486,16 @@ function prepareELRC() {
     let lrcContent = ''
     tempLyrics.forEach(line => {
         if (!line || line.isTaggedLine) return
-        const syllabus = line.syllabus || []
+        const syllabus = (line.syllabus || []).filter(s => (s.text || '').replace(/]/g, '').trim() !== '')
         if (!syllabus.length) return
         let first = true
         syllabus.forEach(syl => {
+            const cleanText = (syl.text || '').replace(/]/g, '')
             if (first) {
-                lrcContent += '\n[' + msToTime(syl.time || 0) + ']' + (syl.text || '')
+                lrcContent += '\n[' + msToTime(syl.time || 0) + ']' + cleanText
                 first = false
             } else {
-                lrcContent += ' <' + msToTime(syl.time || 0) + '>' + (syl.text || '')
+                lrcContent += ' <' + msToTime(syl.time || 0) + '>' + cleanText
             }
         })
     })
