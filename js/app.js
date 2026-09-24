@@ -586,7 +586,7 @@ function rebuildLyricsDOM() {
             p.classList.add(lineDisplayIdx % 2 === 0 ? 'even' : 'odd')
             const span = document.createElement('span')
             span.classList.add('lyrics-word')
-            span.innerText = line.text
+            span.innerText = (line.text || '').replace(/]/g, '')
             span.id = 'line-' + li
             p.appendChild(span)
             elem_lyricsContent.appendChild(p)
@@ -601,13 +601,14 @@ function rebuildLyricsDOM() {
             ; (line.syllabus || []).forEach((syl, si) => {
                 const span = document.createElement('span')
                 span.classList.add('lyrics-word')
-                span.innerText = syl.text
+                span.innerText = (syl.text || '').replace(/]/g, '')
                 span.id = 'syl-' + li + '-' + si
+                if (syl.text && syl.text.trim() === '') span.classList.add('lyrics-space')
                 if (isRTL(syl.text)) span.classList.add('rtl-word')
                 if (syl.isBackground) span.classList.add('background-word')
                 if (syl.isDone) {
                     span.classList.add('done-word')
-                    span.style.setProperty('--duration', syl.duration + 'ms')
+                    span.style.setProperty('--duration', (syl.duration || 0) + 'ms')
                 }
                 syl.element = span
                 p.appendChild(span)
@@ -873,11 +874,11 @@ function parseLyrics() {
 
             for (const [oldIdx, newIdx] of matches) {
                 const oldSyl = oldSyls[oldIdx]
+                syllabus[newIdx].isBackground = !!oldSyl.isBackground
                 if (oldSyl.isDone) {
                     syllabus[newIdx].time = oldSyl.time
                     syllabus[newIdx].duration = oldSyl.duration
                     syllabus[newIdx].isDone = oldSyl.isDone
-                    syllabus[newIdx].isBackground = !!oldSyl.isBackground
                 }
             }
         }
@@ -1228,13 +1229,16 @@ function toggleBackgroundVocal() {
     }
 
     const { startIdx, endIdx } = action.run
+    const isMarking = (action.mode === 'mark')
     for (let i = startIdx; i <= endIdx; i++) {
-        line.syllabus[i].isBackground = (action.mode === 'mark')
+        line.syllabus[i].isBackground = isMarking
+        if (line.syllabus[i].element) {
+            line.syllabus[i].element.classList.toggle('background-word', isMarking)
+        }
     }
 
-    const selSyl = allSyllables[selectedWordIndex]
-    _resyncAfterStructuralChange(selSyl.lineIdx, selSyl.syllabusIdx)
-    showToast(action.mode === 'mark' ? 'Marked as background vocal' : 'Background vocal unmarked')
+    refreshWordActionButtons()
+    showToast(isMarking ? 'Marked as background vocal' : 'Background vocal unmarked')
 }
 
 function isRTL(s) {
