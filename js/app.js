@@ -954,13 +954,7 @@ function nextWord() {
         setTimeout(() => { NextWordButton.classList.remove('enabled') }, 50)
     }
 
-    if (!allSyllables || allSyllables.length === 0) return
-
-    // If cursor is past the end, re-align to playback time before giving up
-    if (currentWordIndex >= allSyllables.length) {
-        alignCursorToPlaybackTime()
-        if (currentWordIndex >= allSyllables.length) return
-    }
+    if (allSyllables.length === 0 || currentWordIndex >= allSyllables.length) return
 
     const time = player.currentTime * 1000
     const entry = allSyllables[currentWordIndex]
@@ -1731,86 +1725,14 @@ elem_musicInput.addEventListener('change', function () {
     }
 })
 
-let _userExplicitWordSelect = false
-
-function alignCursorToPlaybackTime() {
-    if (!allSyllables || allSyllables.length === 0) return
-    const time = (player.currentTime || 0) * 1000
-
-    let firstSyncedAfter = -1
-    let lastSyncedBefore = -1
-
-    for (let i = 0; i < allSyllables.length; i++) {
-        const entry = allSyllables[i]
-        if (!entry || entry.isEndOfLine || entry.lineIdx < 0) continue
-        const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
-        if (syl && syl.isDone && syl.time != null && syl.time > 0) {
-            if (syl.time >= time) {
-                if (firstSyncedAfter === -1) firstSyncedAfter = i
-            } else {
-                lastSyncedBefore = i
-            }
-        }
-    }
-
-    let targetIndex = -1
-    let firstUnsyncedAfterLastSynced = -1
-    const searchStart = lastSyncedBefore !== -1 ? lastSyncedBefore + 1 : 0
-    for (let i = searchStart; i < allSyllables.length; i++) {
-        const entry = allSyllables[i]
-        if (!entry || entry.isEndOfLine || entry.lineIdx < 0) continue
-        const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
-        if (!syl || !syl.isDone || !syl.time) {
-            firstUnsyncedAfterLastSynced = i
-            break
-        }
-    }
-
-    if (firstUnsyncedAfterLastSynced !== -1) {
-        if (firstSyncedAfter === -1) {
-            targetIndex = firstUnsyncedAfterLastSynced
-        } else if (firstUnsyncedAfterLastSynced < firstSyncedAfter) {
-            const nextSyncedTime = tempLyrics[allSyllables[firstSyncedAfter].lineIdx]?.syllabus[allSyllables[firstSyncedAfter].syllabusIdx]?.time || 0
-            if (nextSyncedTime - time <= 1500) {
-                targetIndex = firstSyncedAfter
-            } else {
-                targetIndex = firstUnsyncedAfterLastSynced
-            }
-        }
-    }
-
-    if (targetIndex === -1 && firstSyncedAfter !== -1) {
-        targetIndex = firstSyncedAfter
-    }
-    if (targetIndex === -1 && lastSyncedBefore !== -1) {
-        targetIndex = Math.min(lastSyncedBefore + 1, allSyllables.length - 1)
-    }
-    if (targetIndex === -1) targetIndex = 0
-
-    if (targetIndex >= 0 && targetIndex < allSyllables.length) {
-        currentWordIndex = targetIndex
-        const entry = allSyllables[targetIndex]
-        if (entry && !entry.isEndOfLine && entry.lineIdx >= 0) {
-            const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
-            if (syl && syl.element) {
-                const prevCurrent = document.querySelector('.current-word')
-                if (prevCurrent) prevCurrent.classList.remove('current-word')
-                syl.element.classList.add('current-word')
-            }
-        }
-    }
-}
-
 player.on('play', function () {
     goBackIndex = 0
 })
 
 player.on('seeked', function () {
-    if (_userExplicitWordSelect) return
     if (document.activeElement && (document.activeElement.closest('.plyr') || document.activeElement.tagName === 'BUTTON')) {
         document.activeElement.blur()
     }
-    alignCursorToPlaybackTime()
 })
 
 function isTextInputActive(target = document.activeElement) {
