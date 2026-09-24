@@ -972,9 +972,12 @@ function nextWord() {
                     prevSyl.element.classList.remove('current-word')
                 }
                 const prevLine = tempLyrics[prev.lineIdx]
-                if (prevLine) {
-                    const lastLineSyl = prevLine.syllabus[prevLine.syllabus.length - 1]
-                    prevLine.duration = (lastLineSyl.time + lastLineSyl.duration) - prevLine.time
+                if (prevLine && prevLine.syllabus) {
+                    const doneSyls = prevLine.syllabus.filter(s => s.isDone && s.time > 0)
+                    if (doneSyls.length > 0) {
+                        const maxEnd = Math.max(...doneSyls.map(s => s.time + s.duration))
+                        prevLine.duration = Math.max(0, maxEnd - (prevLine.time || 0))
+                    }
                 }
             }
         }
@@ -1352,23 +1355,25 @@ function prepareNewKpoeJSON(cleanTiming = true) {
         })
         .map(line => {
             // Clean and filter syllables first
-            const cleanedSyllables = (line.syllabus || [])
-                .filter(s => !cleanTiming || (s.text || '').replace(/\]/g, '').trim() !== '')
-                .map(s => {
-                    const out = {
-                        time: Math.round(s.time || 0),
-                        duration: Math.round(s.duration || 0),
-                        text: (s.text || '').replace(/\]/g, '')
-                    };
-                    if (s.isBackground) out.isBackground = true;
-                    return out;
-                });
+            const rawFiltered = (line.syllabus || [])
+                .filter(s => !cleanTiming || (s.text || '').replace(/\]/g, '').trim() !== '');
+
+            const cleanedSyllables = rawFiltered.map(s => {
+                const start = Math.round(s.time || 0);
+                const end = Math.round((s.time || 0) + (s.duration || 0));
+                const out = {
+                    time: start,
+                    duration: Math.max(0, end - start),
+                    text: (s.text || '').replace(/\]/g, '')
+                };
+                if (s.isBackground) out.isBackground = true;
+                return out;
+            });
 
             let actualLineDuration = Math.round(line.duration || 0);
             if (cleanedSyllables.length > 0) {
-                const lastSyllable = cleanedSyllables[cleanedSyllables.length - 1];
-                const lineEnd = lastSyllable.time + lastSyllable.duration;
-                actualLineDuration = lineEnd - Math.round(line.time || 0);
+                const lineEnd = Math.max(...cleanedSyllables.map(s => s.time + s.duration));
+                actualLineDuration = Math.max(0, lineEnd - Math.round(line.time || 0));
             }
 
             // Reconstruct line text from the cleaned syllables to keep them in sync
@@ -1435,16 +1440,18 @@ function prepareLegacyJSON(cleanTiming = true) {
         });
 
         activeSyllables.forEach((syl, si) => {
+            const start = Math.round(syl.time || 0);
+            const end = Math.round((syl.time || 0) + (syl.duration || 0));
             const word = {
-                time: Math.round(syl.time || 0),
-                duration: Math.round(syl.duration || 0),
+                time: start,
+                duration: Math.max(0, end - start),
                 text: (syl.text || '').replace(/\]/g, ''),
                 isLineEnding: si === activeSyllables.length - 1 ? 1 : 0,
                 element: { key, songPart: partName, singer }
-            }
-            if (syl.isBackground) word.isBackground = true
-            exportedWords.push(word)
-        })
+            };
+            if (syl.isBackground) word.isBackground = true;
+            exportedWords.push(word);
+        });
     })
 
     const plainText = elem_lyricsInput.value !== '' ? elem_lyricsInput.value : undefined
