@@ -948,7 +948,13 @@ function nextWord() {
         setTimeout(() => { NextWordButton.classList.remove('enabled') }, 50)
     }
 
-    if (allSyllables.length === 0 || currentWordIndex >= allSyllables.length) return
+    if (!allSyllables || allSyllables.length === 0) return
+
+    // If cursor is past the end, re-align to playback time before giving up
+    if (currentWordIndex >= allSyllables.length) {
+        alignCursorToPlaybackTime()
+        if (currentWordIndex >= allSyllables.length) return
+    }
 
     const time = player.currentTime * 1000
     const entry = allSyllables[currentWordIndex]
@@ -1043,11 +1049,20 @@ function openWord(wordIndex) {
     document.querySelectorAll('.opened-word').forEach(el => el.classList.remove('opened-word'))
     if (syl.element) syl.element.classList.add('opened-word')
 
+    const prevCurrent = document.querySelector('.current-word')
+    if (prevCurrent) prevCurrent.classList.remove('current-word')
+    if (syl.element) syl.element.classList.add('current-word')
+
     document.getElementById('properties-word').innerText = syl.text || ''
     document.getElementById('properties-start').value = syl.time || 0
     document.getElementById('properties-length').value = syl.duration || 0
     updateTimeDisplays()
-    player.currentTime = (syl.time || 0) / 1000
+
+    if (syl.time && syl.time > 0) {
+        _userExplicitWordSelect = true
+        player.currentTime = syl.time / 1000
+        setTimeout(() => { _userExplicitWordSelect = false }, 150)
+    }
 
     // Populate line info
     const lineTextEl = document.getElementById('properties-line-text')
@@ -1566,78 +1581,87 @@ function importKMAKE() {
 }
 
 setInterval(() => {
-    if (!tempLyrics || tempLyrics.length === 0) return
+    try {
+        if (!tempLyrics || tempLyrics.length === 0) return
 
-    if (player.paused) {
-        document.getElementById('lyrics-content').classList.add('paused')
-    } else {
-        document.getElementById('lyrics-content').classList.remove('paused')
-    }
-
-    const time = player.currentTime * 1000
-
-    let currentSylRef = null
-    for (let i = 0; i < allSyllables.length; i++) {
-        const { lineIdx, syllabusIdx } = allSyllables[i]
-        if (lineIdx < 0) break
-        const syl = tempLyrics[lineIdx]?.syllabus[syllabusIdx]
-        if (!syl || !syl.isDone) break
-        if ((syl.time || 0) > time) {
-            if (i > 0) currentSylRef = allSyllables[i - 1]
-            break
-        }
-        currentSylRef = allSyllables[i]
-    }
-
-    const playingEl = document.querySelector('.playing-word')
-    if (playingEl) playingEl.classList.remove('playing-word')
-
-    let currentSyl = null
-    if (currentSylRef) {
-        currentSyl = tempLyrics[currentSylRef.lineIdx]?.syllabus[currentSylRef.syllabusIdx]
-        if (currentSyl?.element) currentSyl.element.classList.add('playing-word')
-    }
-
-    const sylId = currentSylRef ? `${currentSylRef.lineIdx}-${currentSylRef.syllabusIdx}` : ''
-    if (sylId === lastPlayedSylId) return
-    lastPlayedSylId = sylId
-    played_word = currentSyl?.text || ''
-
-    const allSylElems = Array.from(document.querySelectorAll('.lyrics-word')).filter(el => el.id.startsWith('syl-'))
-    const currentElem = currentSyl?.element
-    const currentElemIdx = currentElem ? allSylElems.indexOf(currentElem) : -1
-    allSylElems.forEach((el, idx) => { el.classList.toggle('past-word', idx < currentElemIdx) })
-
-    document.querySelectorAll('.lyrics-line:not(.tagged-line)').forEach(l => {
-        l.classList.remove('playing-line', 'next-playing-line', 'previous-playing-line', 'next-next-playing-line')
-    })
-
-    if (!currentSyl?.element) return
-    const lyricsLine = currentSyl.element.closest('.lyrics-line')
-    if (!lyricsLine || lyricsLine.classList.contains('tagged-line')) return
-
-    function getValidLine(element, direction) {
-        let cur = element
-        while (cur) {
-            cur = direction === 'next' ? cur.nextElementSibling : cur.previousElementSibling
-            if (cur && !cur.classList.contains('tagged-line')) return cur
-        }
-        return null
-    }
-
-    lyricsLine.classList.add('playing-line')
-    const nextLine = getValidLine(lyricsLine, 'next')
-    if (nextLine) {
-        nextLine.classList.add('next-playing-line')
-        const nextNext = getValidLine(nextLine, 'next')
-        if (nextNext) nextNext.classList.add('next-next-playing-line')
-    }
-    const prevLine = getValidLine(lyricsLine, 'previous')
-    if (prevLine) prevLine.classList.add('previous-playing-line')
-
-    if (document.getElementById('lyrics-content').classList.contains('preview')) {
         const lyricsContent = document.getElementById('lyrics-content')
-        lyricsContent.scrollTop = lyricsLine.offsetTop - lyricsContent.clientHeight / 2 + 120
+        if (!lyricsContent) return
+
+        if (player.paused) {
+            lyricsContent.classList.add('paused')
+        } else {
+            lyricsContent.classList.remove('paused')
+        }
+
+        const time = (player.currentTime || 0) * 1000
+
+        let currentSylRef = null
+        for (let i = 0; i < allSyllables.length; i++) {
+            const entry = allSyllables[i]
+            if (!entry || entry.isEndOfLine || entry.lineIdx < 0) continue
+            const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
+            if (!syl || !syl.isDone || syl.time == null) continue
+            if (syl.time <= time) {
+                currentSylRef = entry
+            } else {
+                break
+            }
+        }
+
+        let currentSyl = null
+        if (currentSylRef) {
+            currentSyl = tempLyrics[currentSylRef.lineIdx]?.syllabus[currentSylRef.syllabusIdx]
+        }
+        const currentSylElem = currentSyl?.element || null
+        const playingEl = document.querySelector('.playing-word')
+        if (playingEl && playingEl !== currentSylElem) {
+            playingEl.classList.remove('playing-word')
+        }
+        if (currentSylElem && !currentSylElem.classList.contains('playing-word')) {
+            currentSylElem.classList.add('playing-word')
+        }
+
+        const sylId = currentSylRef ? `${currentSylRef.lineIdx}-${currentSylRef.syllabusIdx}` : ''
+        if (sylId === lastPlayedSylId) return
+        lastPlayedSylId = sylId
+        played_word = currentSyl?.text || ''
+
+        const allSylElems = Array.from(document.querySelectorAll('.lyrics-word')).filter(el => el.id && el.id.startsWith('syl-'))
+        const currentElemIdx = currentSylElem ? allSylElems.indexOf(currentSylElem) : -1
+        allSylElems.forEach((el, idx) => { el.classList.toggle('past-word', idx < currentElemIdx) })
+
+        document.querySelectorAll('.lyrics-line:not(.tagged-line)').forEach(l => {
+            l.classList.remove('playing-line', 'next-playing-line', 'previous-playing-line', 'next-next-playing-line')
+        })
+
+        if (!currentSylElem) return
+        const lyricsLine = currentSylElem.closest('.lyrics-line')
+        if (!lyricsLine || lyricsLine.classList.contains('tagged-line')) return
+
+        function getValidLine(element, direction) {
+            let cur = element
+            while (cur) {
+                cur = direction === 'next' ? cur.nextElementSibling : cur.previousElementSibling
+                if (cur && !cur.classList.contains('tagged-line')) return cur
+            }
+            return null
+        }
+
+        lyricsLine.classList.add('playing-line')
+        const nextLine = getValidLine(lyricsLine, 'next')
+        if (nextLine) {
+            nextLine.classList.add('next-playing-line')
+            const nextNext = getValidLine(nextLine, 'next')
+            if (nextNext) nextNext.classList.add('next-next-playing-line')
+        }
+        const prevLine = getValidLine(lyricsLine, 'previous')
+        if (prevLine) prevLine.classList.add('previous-playing-line')
+
+        if (lyricsContent.classList.contains('preview')) {
+            lyricsContent.scrollTop = lyricsLine.offsetTop - lyricsContent.clientHeight / 2 + 120
+        }
+    } catch (e) {
+        // Safe execution
     }
 }, 1)
 
@@ -1696,16 +1720,102 @@ elem_musicInput.addEventListener('change', function () {
     }
 })
 
+let _userExplicitWordSelect = false
+
+function alignCursorToPlaybackTime() {
+    if (!allSyllables || allSyllables.length === 0) return
+    const time = (player.currentTime || 0) * 1000
+
+    let firstSyncedAfter = -1
+    let lastSyncedBefore = -1
+
+    for (let i = 0; i < allSyllables.length; i++) {
+        const entry = allSyllables[i]
+        if (!entry || entry.isEndOfLine || entry.lineIdx < 0) continue
+        const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
+        if (syl && syl.isDone && syl.time != null && syl.time > 0) {
+            if (syl.time >= time) {
+                if (firstSyncedAfter === -1) firstSyncedAfter = i
+            } else {
+                lastSyncedBefore = i
+            }
+        }
+    }
+
+    let targetIndex = -1
+    let firstUnsyncedAfterLastSynced = -1
+    const searchStart = lastSyncedBefore !== -1 ? lastSyncedBefore + 1 : 0
+    for (let i = searchStart; i < allSyllables.length; i++) {
+        const entry = allSyllables[i]
+        if (!entry || entry.isEndOfLine || entry.lineIdx < 0) continue
+        const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
+        if (!syl || !syl.isDone || !syl.time) {
+            firstUnsyncedAfterLastSynced = i
+            break
+        }
+    }
+
+    if (firstUnsyncedAfterLastSynced !== -1) {
+        if (firstSyncedAfter === -1) {
+            targetIndex = firstUnsyncedAfterLastSynced
+        } else if (firstUnsyncedAfterLastSynced < firstSyncedAfter) {
+            const nextSyncedTime = tempLyrics[allSyllables[firstSyncedAfter].lineIdx]?.syllabus[allSyllables[firstSyncedAfter].syllabusIdx]?.time || 0
+            if (nextSyncedTime - time <= 1500) {
+                targetIndex = firstSyncedAfter
+            } else {
+                targetIndex = firstUnsyncedAfterLastSynced
+            }
+        }
+    }
+
+    if (targetIndex === -1 && firstSyncedAfter !== -1) {
+        targetIndex = firstSyncedAfter
+    }
+    if (targetIndex === -1 && lastSyncedBefore !== -1) {
+        targetIndex = Math.min(lastSyncedBefore + 1, allSyllables.length - 1)
+    }
+    if (targetIndex === -1) targetIndex = 0
+
+    if (targetIndex >= 0 && targetIndex < allSyllables.length) {
+        currentWordIndex = targetIndex
+        const entry = allSyllables[targetIndex]
+        if (entry && !entry.isEndOfLine && entry.lineIdx >= 0) {
+            const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
+            if (syl && syl.element) {
+                const prevCurrent = document.querySelector('.current-word')
+                if (prevCurrent) prevCurrent.classList.remove('current-word')
+                syl.element.classList.add('current-word')
+            }
+        }
+    }
+}
+
 player.on('play', function () {
     goBackIndex = 0
 })
 
+player.on('seeked', function () {
+    if (_userExplicitWordSelect) return
+    if (document.activeElement && (document.activeElement.closest('.plyr') || document.activeElement.tagName === 'BUTTON')) {
+        document.activeElement.blur()
+    }
+    alignCursorToPlaybackTime()
+})
+
 function isTextInputActive(target = document.activeElement) {
     if (!target) return false
-    const tag = target.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+    if (target.closest('.kmake-modal')) {
+        const tag = target.tagName
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+    }
+    if (target === elem_lyricsInput) return true
     if (target.isContentEditable) return true
-    if (target.closest('.kmake-modal')) return true
+    if (target.closest('.plyr')) return false
+    if (target.id === 'properties-start' || target.id === 'properties-length') return true
+    if (target.tagName === 'TEXTAREA') return true
+    if (target.tagName === 'INPUT' && !['range', 'button', 'submit', 'checkbox', 'radio'].includes(target.type)) {
+        return true
+    }
     return false
 }
 
@@ -1755,22 +1865,28 @@ document.addEventListener('keydown', function (event) {
     // 4. If typing in any input/textarea/select/modal, do NOT intercept normal editing keys
     if (isTextInputActive()) return
 
-    // 5. Space -> Play/Pause
+    // 5. If Plyr controls or a button has focus when pressing Enter or Space, blur it
+    if (event.keyCode === 13 || event.keyCode === 32) {
+        if (document.activeElement && (document.activeElement.closest('.plyr') || document.activeElement.tagName === 'BUTTON')) {
+            document.activeElement.blur()
+        }
+    }
+
+    // 6. Space -> Play/Pause
     if (event.keyCode === 32) {
-        if (document.activeElement.tagName === 'BUTTON' || document.activeElement === elem_musicPlayer) return
-        playPause()
         event.preventDefault()
+        playPause()
         return
     }
 
-    // 6. Enter -> Next Word
+    // 7. Enter -> Next Word
     if (event.keyCode === 13) {
         event.preventDefault()
         nextWord()
         return
     }
 
-    // 7. Arrow Left / Right -> Seek
+    // 8. Arrow Left / Right -> Seek
     if (event.keyCode === 37) { // Left
         event.preventDefault()
         if (currentWordIndex + goBackIndex > 0) {
