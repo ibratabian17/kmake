@@ -398,6 +398,27 @@ function _syncDomSelectionClasses() {
     }
 }
 
+function _scrollSyncElementIntoView(el, onlyIfOutsideComfortZone = false) {
+    if (!el || !elem_lyricsContent || centerMode !== 'sync') return
+    const targetEl = (el.closest && el.closest('#lyrics-content .lyrics-line')) || el
+    const containerRect = elem_lyricsContent.getBoundingClientRect()
+    const targetRect = targetEl.getBoundingClientRect()
+    if (containerRect.height <= 0) return
+
+    const relTop = targetRect.top - containerRect.top
+    const relBottom = targetRect.bottom - containerRect.top
+    const comfortTop = containerRect.height * 0.18
+    const comfortBottom = containerRect.height * 0.78
+
+    if (onlyIfOutsideComfortZone && relTop >= comfortTop && relBottom <= comfortBottom) {
+        return
+    }
+
+    const desiredOffset = containerRect.height * 0.35
+    const targetScrollTop = elem_lyricsContent.scrollTop + (relTop - desiredOffset)
+    elem_lyricsContent.scrollTop = Math.max(0, Math.round(targetScrollTop))
+}
+
 function importSong() {
     elem_musicInput.type = 'file'
     elem_musicInput.accept = '.mp3, .wav, .ogg, .flac, .m4a, .mp4, .opus, .mkv, .webm, .m3u8'
@@ -1464,15 +1485,26 @@ function nextWord() {
         line.duration = (latestSyl.time + latestSyl.duration) - line.time
     }
 
-    if (syl.element) {
-        const prevCurrent = document.querySelector('.current-word')
-        if (prevCurrent) prevCurrent.classList.remove('current-word')
-        syl.element.classList.add('current-word', 'playing-word')
-        elem_lyricsContent.scrollTop = syl.element.offsetTop - elem_lyricsContent.offsetTop - 100
-    }
-
     lastWordIndex = currentWordIndex
     currentWordIndex++
+
+    const nextEntry = (currentWordIndex < allSyllables.length && !allSyllables[currentWordIndex]?.isEndOfLine)
+        ? allSyllables[currentWordIndex]
+        : null
+    const nextSyl = nextEntry ? tempLyrics[nextEntry.lineIdx]?.syllabus[nextEntry.syllabusIdx] : null
+
+    const prevCurrent = document.querySelector('#lyrics-content .current-word')
+    if (prevCurrent) prevCurrent.classList.remove('current-word')
+    if (syl.element) {
+        syl.element.classList.add('playing-word')
+    }
+    if (nextSyl?.element) {
+        nextSyl.element.classList.add('current-word')
+        _scrollSyncElementIntoView(nextSyl.element, false)
+    } else if (syl.element) {
+        syl.element.classList.add('current-word')
+        _scrollSyncElementIntoView(syl.element, false)
+    }
     renderTimeline()
     if (isPreviewActive()) refreshLyricsPlusPreview()
 }
@@ -1547,6 +1579,9 @@ function openWord(wordIndex) {
     }
     const lTr = document.getElementById('properties-line-translated')
     if (lTr) lTr.value = line.translatedText || ''
+    if (syl.element) {
+        _scrollSyncElementIntoView(syl.element, true)
+    }
     refreshWordActionButtons()
     renderTimelineSelection()
 }
@@ -1812,7 +1847,14 @@ function setCenterMode(mode) {
         cancelAnimationFrame(lyricsRendererInstance.lyricsAnimationFrameId)
         lyricsRendererInstance.lyricsAnimationFrameId = null
     }
-    if (mode === 'timeline') {
+    if (mode === 'sync') {
+        requestAnimationFrame(() => {
+            const idx = selectedWordIndex >= 0 ? selectedWordIndex : currentWordIndex
+            const entry = (idx >= 0 && idx < allSyllables.length && !allSyllables[idx]?.isEndOfLine) ? allSyllables[idx] : null
+            const syl = entry ? tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx] : null
+            if (syl?.element) _scrollSyncElementIntoView(syl.element, true)
+        })
+    } else if (mode === 'timeline') {
         elem_navbar?.setAttribute('visible', 'false')
         isVisible = false
         requestAnimationFrame(() => renderTimeline())
@@ -2219,8 +2261,8 @@ setInterval(() => {
         const prevLine = getValidLine(lyricsLine, 'previous')
         if (prevLine) prevLine.classList.add('previous-playing-line')
 
-        if (lyricsContent.classList.contains('preview')) {
-            lyricsContent.scrollTop = lyricsLine.offsetTop - lyricsContent.clientHeight / 2 + 120
+        if (!player.paused || lyricsContent.classList.contains('preview')) {
+            _scrollSyncElementIntoView(lyricsLine, true)
         }
     } catch (e) {}
 }, 20)
@@ -2473,7 +2515,10 @@ document.addEventListener('keydown', function (event) {
             const entry = allSyllables[targetIndex]
             if (entry && !entry.isEndOfLine && entry.lineIdx >= 0) {
                 const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
-                if (syl && syl.time !== undefined) player.currentTime = syl.time / 1000
+                if (syl) {
+                    if (syl.time !== undefined) player.currentTime = syl.time / 1000
+                    if (syl.element) _scrollSyncElementIntoView(syl.element, false)
+                }
             }
         }
     }
@@ -4548,6 +4593,7 @@ function stepBackWord() {
                 syl.element.classList.remove('done-word', 'playing-word')
                 document.querySelectorAll('.current-word').forEach(el => el.classList.remove('current-word'))
                 syl.element.classList.add('current-word')
+                _scrollSyncElementIntoView(syl.element, false)
             }
             _recalcLineBounds(line)
             player.currentTime = seekTargetSec
