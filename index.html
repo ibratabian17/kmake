@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="css/normalize.css">
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
     <link rel="stylesheet" href="css/main.css">
-    <link rel="stylesheet" href="css/preview.css">
+    <link rel="stylesheet" href="css/lyrics.css">
     <link rel="manifest" href="manifest.webmanifest">
     <meta property="og:title" content="kmake - online JSON lyrics generator" />
     <meta property="og:description"
@@ -45,22 +45,42 @@
             <img src="assets/kmake-logo.png" class="logo" />
             <span class="header-divider"></span>
             <div class="buttons-actions">
-                <button id="menu-file">File</button>
-                <button id="menu-song">Song</button>
-                <button id="menu-view">View</button>
+                <button id="btn-nav-home" data-active="true" onclick="toggleHomePage()" title="Projects">Projects</button>
+                <button id="menu-file" class="editor-menu-btn" style="display:none">File</button>
+                <button id="menu-song" class="editor-menu-btn" style="display:none">Song</button>
+                <button id="menu-tools" class="editor-menu-btn" style="display:none">Tools</button>
+                <button id="btn-settings-modal" onclick="openSettingsModal()">Settings</button>
                 <button id="menu-help">Help</button>
             </div>
         </div>
     </div>
 
-    <div id="app">
+    <div id="home-page" class="home-page-view" style="display:flex">
+        <div class="home-page-inner">
+            <div class="home-page-header">
+                <div class="home-page-title-group">
+                    <h1>Projects <span class="version-tag">3.0</span></h1>
+                    <p>Continue working on an existing lyrics project or create a new one</p>
+                </div>
+                <div class="home-page-actions">
+                    <button class="btn-secondary" onclick="importProjectFromHome()">
+                        <i data-lucide="folder-open"></i> Import File
+                    </button>
+                    <button class="btn-primary" onclick="createNewProjectFromHome()">
+                        <i data-lucide="plus"></i> New Project
+                    </button>
+                </div>
+            </div>
+            <div id="home-projects-list" class="home-projects-list"></div>
+        </div>
+    </div>
+    <div id="app" style="display:none">
         <div class="part part-sortable part-left">
             <div class="inner-part">
                 <div class="inner-part-title">
                     <p>Lyrics</p>
                 </div>
                 <div class="inner-part-buttons buttons-top">
-                    <button onclick="importJSON()" id="btn-import-json">Import from JSON</button>
                     <button onclick="parseLyrics()" id="btn-parse-lyrics">Parse</button>
                 </div>
                 <textarea oninput="parseLyrics()" class="inner-part-content" id="lyrics-input"
@@ -68,16 +88,80 @@
             </div>
         </div>
         <div class="part">
-            <div class="inner-part ignore-elements">
-                <div class="inner-part-title">
-                    <p>Sync</p>
+            <div class="inner-part ignore-elements" id="center-part">
+                <div class="inner-part-title center-title-bar">
+                    <div class="mode-steps" id="center-mode-steps">
+                        <button class="mode-step-btn active" id="tab-mode-sync" onclick="setCenterMode('sync')">
+                            <i data-lucide="mic"></i> Sync
+                        </button>
+                        <span class="mode-step-arrow"><i data-lucide="chevron-right"></i></span>
+                        <button class="mode-step-btn" id="tab-mode-timeline" onclick="setCenterMode('timeline')">
+                            <i data-lucide="sliders-horizontal"></i> Timeline
+                        </button>
+                        <span class="mode-step-arrow"><i data-lucide="chevron-right"></i></span>
+                        <button class="mode-step-btn" id="tab-mode-preview" onclick="setCenterMode('preview')">
+                            <i data-lucide="play"></i> Preview
+                        </button>
+                    </div>
                 </div>
-                <div class="inner-part-buttons buttons-top">
-                    <button onclick="nextWord()" id="nextword-button">Next word <span>(Enter)</span></button>
-                    <button id="preview-mode" onclick="previewToggle()">Preview mode</button>
+                <div class="inner-part-buttons buttons-top" id="toolbar-sync">
+                    <button onclick="nextWord()" id="nextword-button">Next word <span id="lbl-key-stamp">(Enter)</span></button>
+                    <button onclick="stepBackWord()" id="stepback-button">Step back <span id="lbl-key-back">(Backspace)</span></button>
+                </div>
+                <div class="inner-part-buttons buttons-top" id="toolbar-timeline" style="display:none">
+                    <button id="tl-btn-follow" class="enabled" onclick="toggleTimelineFollow()">
+                        <i data-lucide="scan"></i> Follow
+                    </button>
+                    <button id="tl-btn-ripple" onclick="toggleTimelineRipple()">
+                        <i data-lucide="move-horizontal"></i> Rolling
+                    </button>
+                    <button id="tl-btn-snap" class="enabled" onclick="toggleTimelineSnap()">
+                        <i data-lucide="magnet"></i> Snap
+                    </button>
+                    <div class="tl-zoom-controls">
+                        <button onclick="timelineZoom(-20)" title="Zoom out"><i data-lucide="minus"></i></button>
+                        <span id="tl-zoom-label" class="tl-zoom-label">100%</span>
+                        <button onclick="timelineZoom(20)" title="Zoom in"><i data-lucide="plus"></i></button>
+                    </div>
+                </div>
+                <div class="inner-part-buttons buttons-top" id="toolbar-preview" style="display:none">
+                    <button id="prev-btn-wbw" class="enabled" onclick="togglePreviewWordByWord()">
+                        <i data-lucide="type"></i> Word-by-Word
+                    </button>
+                    <button id="prev-btn-blur" class="enabled" onclick="togglePreviewBlur()">
+                        <i data-lucide="eye"></i> Blur inactive
+                    </button>
+                    <button id="prev-btn-display" onclick="cyclePreviewDisplayMode()">
+                        <i data-lucide="languages"></i> <span id="prev-display-label">Original</span>
+                    </button>
                 </div>
                 <div id="lyrics-content" data-theme="default" class="inner-part-content">
 
+                </div>
+                <div id="timeline-view" class="inner-part-content timeline-container" style="display:none" tabindex="0">
+                    <div class="tl-scroll-area" id="tl-viewport">
+                        <div class="tl-grid-stage" id="tl-stage">
+                            <div class="tl-top-sticky" id="tl-top-sticky">
+                                <div class="tl-ruler-row">
+                                    <div class="tl-gutter-head"></div>
+                                    <div class="tl-ruler" id="tl-ruler"></div>
+                                </div>
+                                <div class="tl-wave-row" id="tl-wave-row">
+                                    <div class="tl-gutter-wave"><i data-lucide="music"></i></div>
+                                    <div class="tl-wave-track" id="tl-wave-track">
+                                        <canvas id="tl-waveform"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tl-rows-body" id="tl-rows-body"></div>
+                            <div class="tl-marquee-box" id="tl-marquee-box" style="display:none"></div>
+                            <div class="tl-playhead" id="tl-playhead"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="preview-stage" class="inner-part-content preview-stage-wrap" style="display:none">
+                    <div class="preview-ambient-bg" id="preview-ambient-bg"></div>
+                    <div id="lyrics-plus-container-parent" class="preview-lyrics-scroller"></div>
                 </div>
             </div>
         </div>
@@ -88,64 +172,66 @@
                 </div>
                 <div class="inner-part-buttons buttons-top">
                     <button onclick="unselect()" id="unselect-btn" title="Clear selection">Unselect</button>
-                    <button id="properties-preview" class="preview-play-btn" title="Preview this word">▶ Play</button>
+                    <button id="properties-preview" class="preview-play-btn" title="Preview this word">Play</button>
                 </div>
                 <div class="inner-part-content properties" id="properties-panel">
 
-                    <!-- Empty state -->
                     <div class="props-empty" id="props-empty">
                         <div class="props-empty-icon"><i data-lucide="mouse-pointer-click"></i></div>
                         <p>Click any word in the Sync panel to select it</p>
                     </div>
 
-                    <!-- Filled state (hidden until word selected) -->
                     <div class="props-filled" id="props-filled" style="display:none">
 
-                        <!-- Word chip -->
                         <div class="props-word-chip" id="props-word-chip">
-                            <span class="props-word-label">WORD</span>
+                            <span class="props-word-label" id="props-word-label">WORD</span>
                             <span class="props-word-text" id="properties-word"></span>
                         </div>
 
-                        <div class="props-word-actions" id="props-word-actions">
-                            <button class="btn-word-action" id="btn-toggle-background" onclick="toggleBackgroundVocal()" title="Mark parenthesized start/end sentence as background vocal">Mark background</button>
+                        <div class="props-inline-field" id="props-syl-rom-wrap">
+                            <span class="props-mini-label">Syllable Romanization</span>
+                            <input type="text" id="properties-word-romanized" class="props-mini-input" placeholder="Romanized syllable" oninput="onSelectedSyllableRomanizedInput(this.value)" />
                         </div>
 
-                        <!-- Start time -->
+                        <div class="props-word-actions" id="props-word-actions">
+                            <button class="btn-word-action" id="btn-split-word" onclick="promptSplitWord()" title="Split word into syllables using ]">Split</button>
+                            <button class="btn-word-action" id="btn-merge-word" onclick="mergeSelectedWithNext()" title="Merge selected syllable(s)">Merge</button>
+                            <button class="btn-word-action" id="btn-toggle-background" onclick="toggleBackgroundVocal()" title="Toggle background vocal on selection">Background</button>
+                        </div>
+
                         <div class="props-time-block">
                             <div class="props-time-header">
                                 <span class="props-time-label">Start</span>
                                 <span class="props-time-display" id="props-start-display">0:00.000</span>
                             </div>
                             <div class="props-nudge-row">
-                                <button class="nudge-btn nudge-big-minus"  onclick="nudgeProperty('start', -100)" title="-100ms">−100</button>
-                                <button class="nudge-btn nudge-small-minus" onclick="nudgeProperty('start', -10)"  title="-10ms">−10</button>
+                                <button class="nudge-btn" onclick="nudgeProperty('start', event.shiftKey ? -100 : -10)" title="-10ms (Shift: -100ms)">−10</button>
                                 <input type="number" id="properties-start" class="props-raw-input" value="0" title="Raw ms value" />
-                                <button class="nudge-btn nudge-small-plus"  onclick="nudgeProperty('start', +10)"  title="+10ms">+10</button>
-                                <button class="nudge-btn nudge-big-plus"   onclick="nudgeProperty('start', +100)" title="+100ms">+100</button>
+                                <button class="nudge-btn" onclick="nudgeProperty('start', event.shiftKey ? 100 : 10)" title="+10ms (Shift: +100ms)">+10</button>
                             </div>
-                            <button class="btn-sync-here" onclick="syncWordToCursor('start')" title="Set to current playback position">⏱ Sync to playhead</button>
+                            <button class="btn-sync-here" onclick="syncWordToCursor('start')" title="Set to current playback position">Sync to playhead</button>
                         </div>
 
-                        <!-- Duration -->
                         <div class="props-time-block">
                             <div class="props-time-header">
                                 <span class="props-time-label">Duration</span>
                                 <span class="props-time-display" id="props-length-display">0:00.000</span>
                             </div>
                             <div class="props-nudge-row">
-                                <button class="nudge-btn nudge-big-minus"  onclick="nudgeProperty('length', -100)" title="-100ms">−100</button>
-                                <button class="nudge-btn nudge-small-minus" onclick="nudgeProperty('length', -10)"  title="-10ms">−10</button>
+                                <button class="nudge-btn" onclick="nudgeProperty('length', event.shiftKey ? -100 : -10)" title="-10ms (Shift: -100ms)">−10</button>
                                 <input type="number" id="properties-length" class="props-raw-input" value="0" title="Raw ms value" />
-                                <button class="nudge-btn nudge-small-plus"  onclick="nudgeProperty('length', +10)"  title="+10ms">+10</button>
-                                <button class="nudge-btn nudge-big-plus"   onclick="nudgeProperty('length', +100)" title="+100ms">+100</button>
+                                <button class="nudge-btn" onclick="nudgeProperty('length', event.shiftKey ? 100 : 10)" title="+10ms (Shift: +100ms)">+10</button>
+                            </div>
+                            <button class="btn-sync-here" onclick="syncWordToCursor('end')" title="Set end (or stretch multi-selection end) to current playback position">Sync end to playhead</button>
+                            <div class="props-word-actions" id="props-multi-retime" style="display:none;margin-top:4px">
+                                <button class="btn-word-action" onclick="scaleSelectedWordsTiming(0.9)" title="Compress selected timing span by 10%">90%</button>
+                                <button class="btn-word-action" onclick="scaleSelectedWordsTiming(1.1)" title="Stretch selected timing span by 10%">110%</button>
+                                <button class="btn-word-action" onclick="distributeSelectedWordsEvenly()" title="Distribute selected syllables evenly across their time span">Evenly</button>
                             </div>
                         </div>
 
-                        <!-- Divider -->
                         <div class="props-divider"></div>
 
-                        <!-- Selected line -->
                         <div class="props-section-label">SELECTED LINE</div>
                         <div class="props-line-chip" id="props-line-chip">
                             <span class="props-line-text" id="properties-line-text">—</span>
@@ -156,6 +242,17 @@
                             <select id="properties-line-agent" onchange="changeSelectedLineAgent(this.value)" class="props-agent-select">
                             </select>
                         </div>
+                        <div class="props-inline-field">
+                            <div class="props-mini-header">
+                                <span class="props-mini-label">Line Romanization</span>
+                                <button class="btn-mini-link" onclick="distributeLineRomanizationToSyllables()">Apply to syllables</button>
+                            </div>
+                            <input type="text" id="properties-line-romanized" class="props-mini-input" placeholder="Romanized line (use ] or space)" onchange="onSelectedLineRomanizedChange(this.value)" />
+                        </div>
+                        <div class="props-inline-field">
+                            <span class="props-mini-label">Line Translation</span>
+                            <input type="text" id="properties-line-translated" class="props-mini-input" placeholder="Translated line" oninput="onSelectedLineTranslatedInput(this.value)" />
+                        </div>
 
                     </div>
                 </div>
@@ -164,8 +261,8 @@
         </div>
     </div>
 
-    <div id="navbar" class="inner-part inner-music" visible="true">
-        <div class="richer-music"> <!-- Content for expanded view -->
+    <div id="navbar" class="inner-part inner-music" visible="false" style="display:none">
+        <div class="richer-music">
             <div class="inner-part-title">
                 <p>Music</p>
             </div>
@@ -205,7 +302,9 @@
     <script>
         lucide.createIcons();
     </script>
-    <script src="js/app.js" async defer></script>
+    <script src="js/parser.js"></script>
+    <script src="js/lyricsRenderer.js"></script>
+    <script src="js/app.js"></script>
 </body>
 
 </html>

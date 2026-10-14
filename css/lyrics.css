@@ -1,0 +1,1167 @@
+/* ==========================================================================
+   LYRICS PLUS - BASE CONTAINER & LAYOUT
+   ========================================================================== */
+
+@property --lyrics-line-delay {
+    syntax: '<time>';
+    inherits: false;
+    initial-value: 0ms;
+}
+
+/* --- Base Variables & Palette --- */
+#lyrics-plus-container {
+    --lyplus-lyrics-pallete: #ffffff;
+
+    --lyplus-padding-base: 1em;
+    --lyplus-padding-line: 10px;
+    --lyplus-padding-gap: 0.4em;
+    --lyplus-border-radius-base: 0.6em;
+    --lyplus-gap-dot-size: 0.4em;
+    --lyplus-gap-dot-margin: 0.1em;
+
+    --lyplus-font-size-base: 25px;
+    --lyplus-font-size-subtext: 0.6em;
+    --lyplus-font-size-line: 1em;
+    --lyplus-font-size-metadata: .6em;
+    --lyplus-font-size-provider: .5em;
+    --lyplus-font-size-status: 24px;
+    --lyplus-font-size-button: 18px;
+
+    --lyplus-text-primary: var(--lyplus-lyrics-pallete);
+    --lyplus-text-secondary: #ffffff55;
+    --lyplus-mask-dim-alpha: 0.333;
+
+    --lyplus-blur-amount: 0.07em;
+    --lyplus-blur-amount-near: 0.035em;
+
+    --lyplus-fade-gap-timing-function: ease-out;
+
+    --lyplus-lyrics-elevation: -0.05em;
+
+    --lyplus-spring-scroll: true;
+    --lyplus-spring-zeta: 0.78;
+    --lyplus-spring-settle-ratio: 1.5;
+    --lyplus-spring-zeta-relax: 0.8;
+    --lyplus-spring-settle-ratio-relax: 1.5;
+
+    display: none;
+    width: 100%;
+    height: max-content;
+    padding-top: calc(1em + var(--lyrics-scroll-padding-top, 0px));
+    box-sizing: border-box;
+    color: var(--yt-spec-text-primary, var(--lyplus-text-primary));
+    font-family: var(--lyplus-font-family), Roboto, Noto Naskh Arabic UI, Arial, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    font-weight: bolder;
+    direction: ltr;
+    transform: translateZ(0);
+    font-size: var(--lyplus-font-size-base);
+    color-scheme: only light; /* tell browser that this only work on lightmode*/
+}
+
+#lyrics-plus-container.override-palette-color {
+    --lyplus-lyrics-pallete: var(--lyplus-override-pallete) !important;
+}
+
+#lyrics-plus-container.lyrics-plus-message {
+    height: 100%;
+}
+
+/* --- Scroll Behavior & Performance --- */
+#lyrics-plus-container-parent {
+    --lyrics-scroll-padding-top: 25%;
+    scrollbar-width: none;
+    will-change: scroll-position;
+    /* layout jumps are compensated manually (FLIP), don't let the browser do it twice */
+    overflow-anchor: none;
+}
+
+/* --- Selection Styles --- */
+#lyrics-plus-container *::selection,
+#lyrics-plus-container *::-moz-selection {
+    background: #ffffff21;
+    color: var(--lyplus-text-primary);
+}
+
+/* ==========================================================================
+   LYRICS LINE & CONTENT
+   ========================================================================== */
+
+/* --- Base Line Styles --- */
+.lyrics-line {
+    padding: var(--lyplus-padding-line);
+    opacity: 0.8;
+    color: var(--lyplus-text-secondary);
+    font-size: var(--lyplus-font-size-line);
+    cursor: pointer;
+    transform-origin: left;
+    transform: translateZ(1px);
+    transition: opacity 0.3s ease, transform 0.4s cubic-bezier(.41, 0, .12, .99) var(--lyrics-line-delay, 0ms), filter 0.3s ease;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 3.5em;
+    text-rendering: optimizeLegibility;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.lyrics-line:not(.scroll-animate),
+.lyrics-plus-metadata:not(.scroll-animate) {
+    animation: none;
+}
+
+.line-by-line-mode .lyrics-line:not(.lyrics-gap) .main-vocal-container {
+    color: var(--lyplus-text-secondary);
+    transition: transform 0.7s ease, color 0.7s;
+}
+
+.line-by-line-mode .lyrics-line:not(.lyrics-gap).active .main-vocal-container {
+    opacity: 1;
+    color: var(--lyplus-text-primary);
+    transition: transform 0.5s ease, color 0.18s;
+}
+
+/* --- Line States & Modifiers --- */
+.lyrics-line.active {
+    opacity: 1;
+    color: var(--lyplus-text-primary);
+    will-change: transform, opacity;
+}
+
+.lyrics-line.singer-right {
+    text-align: end;
+}
+
+.lyrics-line.rtl-text {
+    direction: rtl;
+}
+
+.lyrics-line::selection {
+    color: rgb(255, 255, 255);
+    background-color: #ffffff17;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .lyrics-line:hover {
+        background: #ffffff21;
+    }
+
+    .lyrics-line {
+        border-radius: var(--lyplus-border-radius-base);
+    }
+}
+
+#lyrics-plus-container.blur-inactive-enabled:not(.not-focused) .lyrics-line:not(.active):not(.lyrics-gap),
+#lyrics-plus-container.blur-inactive-enabled:not(.not-focused) .lyrics-plus-metadata:not(.lyrics-activest) {
+    filter: blur(var(--lyplus-blur-amount));
+}
+
+#lyrics-plus-container.blur-inactive-enabled:not(.not-focused) .lyrics-line.post-active-line:not(.lyrics-gap):not(.active),
+#lyrics-plus-container.blur-inactive-enabled:not(.not-focused) .lyrics-line.next-active-line:not(.lyrics-gap):not(.active),
+#lyrics-plus-container.blur-inactive-enabled:not(.not-focused) .lyrics-line.lyrics-activest:not(.active):not(.lyrics-gap) {
+    filter: blur(var(--lyplus-blur-amount-near));
+}
+
+#lyrics-plus-container.hide-offscreen .lyrics-line.viewport-hidden * {
+    visibility: hidden;
+    animation: none !important;
+    transition: none !important;
+    will-change: auto !important;
+    filter: none !important;
+}
+
+/* --- Directionality & Text Alignment --- */
+#lyrics-plus-container .lyrics-line.rtl-text.singer-left .lyrics-romanization-container,
+#lyrics-plus-container .lyrics-line.singer-left .lyrics-romanization-container.rtl-text {
+    text-align: end;
+}
+
+#lyrics-plus-container .lyrics-line.rtl-text.singer-right .lyrics-romanization-container,
+#lyrics-plus-container .lyrics-line.singer-right .lyrics-romanization-container.rtl-text {
+    text-align: start;
+}
+
+#lyrics-plus-container.dual-side-lyrics .lyrics-line:not(.rtl-text).singer-left,
+#lyrics-plus-container.dual-side-lyrics:not(.mixed-direction-lyrics) .lyrics-line.rtl-text.singer-right {
+    padding-right: 20%;
+}
+
+#lyrics-plus-container.dual-side-lyrics .lyrics-line:not(.rtl-text).singer-right,
+#lyrics-plus-container.dual-side-lyrics:not(.mixed-direction-lyrics) .lyrics-line.rtl-text.singer-left {
+    padding-left: 20%;
+}
+
+#lyrics-plus-container.mixed-direction-lyrics.dual-side-lyrics .lyrics-line.rtl-text.singer-left {
+    text-align: left;
+    padding-right: 20%;
+}
+
+#lyrics-plus-container.mixed-direction-lyrics.dual-side-lyrics .lyrics-line.rtl-text.singer-right {
+    text-align: right;
+    padding-left: 20%;
+}
+
+.lyrics-line.singer-right:not(.rtl-text) .lyrics-line-container,
+.lyrics-line.rtl-text:not(.singer-right) .lyrics-line-container,
+#lyrics-plus-container.mixed-direction-lyrics.dual-side-lyrics .lyrics-line.rtl-text.singer-right .lyrics-line-container {
+    transform-origin: right;
+}
+
+#lyrics-plus-container.mixed-direction-lyrics.dual-side-lyrics .lyrics-line.rtl-text.singer-left .lyrics-line-container {
+    transform-origin: left;
+}
+
+.lyrics-line.singer-right:not(.rtl-text) .main-vocal-container,
+.lyrics-line.rtl-text:not(.singer-right) .main-vocal-container,
+#lyrics-plus-container.mixed-direction-lyrics.dual-side-lyrics .lyrics-line.rtl-text.singer-right .main-vocal-container {
+    transform-origin: 95% 50%;
+}
+
+#lyrics-plus-container.mixed-direction-lyrics.dual-side-lyrics .lyrics-line.rtl-text.singer-left .main-vocal-container,
+.lyrics-line .main-vocal-container {
+    transform-origin: 5% 50%;
+}
+
+/* ==========================================================================
+   VOCAL & WORD/SYLLABLE STYLES
+   ========================================================================== */
+
+/* --- Vocal Containers --- */
+.lyrics-line p {
+    margin: 0;
+}
+
+.lyrics-line:not(.lyrics-gap) .lyrics-line-container {
+    overflow-wrap: break-word;
+    transform-origin: left;
+    transform: scale3d(0.93, 0.93, 0.95);
+    transition: transform 0.7s ease, background-color 0.7s, color 0.7s;
+}
+
+#lyrics-plus-container.relax-scroll .lyrics-line:not(.lyrics-gap) .lyrics-line-container {
+    transform: scale3d(1, 1, 1);
+    transition: transform 0.3s ease, background-color 0.7s, color 0.7s;
+}
+
+.lyrics-line.active:not(.lyrics-gap) .lyrics-line-container {
+    transform: scale3d(1.001, 1.001, 1);
+    will-change: transform;
+    transition: transform 0.5s ease, background-color 0.18s, color 0.18s;
+}
+
+.lyrics-line .background-vocal-container {
+    max-height: 0;
+    overflow: visible;
+    opacity: 0;
+    font-size: var(--lyplus-font-size-subtext);
+    transition: opacity calc(var(--scroll-duration, 400ms) * 0.4) ease-in;
+}
+
+.lyrics-line:not(.active) .background-vocal-container {
+    pointer-events: none;
+}
+
+.lyrics-line.has-bg-vocal {
+    content-visibility: visible;
+}
+
+.lyrics-line .background-vocal-container.onTop .background-vocal-wrap {
+    padding-top: 0.0em;
+    padding-bottom: 0.26em;
+}
+
+.lyrics-line .background-vocal-container .background-vocal-wrap {
+    display: block;
+    padding-top: 0.26em;
+    padding-bottom: 0.0em;
+}
+
+.lyrics-line.active .background-vocal-container {
+    max-height: none;
+    opacity: 1;
+    transition: opacity var(--scroll-duration, 400ms) var(--scroll-easing, cubic-bezier(.41, 0, .12, .99));
+}
+
+#lyrics-plus-container.user-scrolling .lyrics-line,
+#lyrics-plus-container.user-scrolling .lyrics-plus-metadata {
+    --lyrics-line-delay: 0ms !important;
+    transition-delay: 0ms !important;
+}
+
+#lyrics-plus-container .lyrics-plain-text-content {
+    white-space: pre-wrap;
+    font-size: var(--lyplus-font-size-metadata);
+    font-weight: normal;
+    opacity: 0.75;
+    padding: 0 var(--lyplus-padding-line);
+}
+
+#lyrics-plus-container.blur-inactive-enabled:not(.not-focused).plain-text-mode .lyrics-plus-metadata:not(.lyrics-activest) {
+    filter: none;
+}
+
+#lyrics-plus-container.plain-text-mode span.lyrics-song-writters {
+    opacity: 0.75;
+}
+
+#lyrics-plus-container.plain-text-mode span.lyrics-source-provider {
+    opacity: 0.65;
+}
+
+/* --- Word & Syllable Base Styles --- */
+.lyrics-word:not(.allow-break) {
+    display: inline-block;
+    vertical-align: baseline;
+}
+
+.lyrics-line .lyrics-syllable {
+    display: inline-block;
+    padding: 0.5em 0.25em;
+    margin: -0.5em -0.25em;
+    color: var(--lyplus-text-secondary);
+    white-space: normal;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0;
+    transition: transform 0.7s ease;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+}
+
+/* --- Syllable States (Finished, Highlight, etc.) --- */
+.lyrics-line .lyrics-syllable.finished {
+    color: var(--lyplus-text-primary);
+    transition: transform 1s ease !important;
+}
+
+.lyrics-line:not(.active) .lyrics-syllable {
+    transition: color 0.5s ease, transform 0.7s ease;
+}
+
+.lyrics-line:not(.active) .lyrics-syllable.finished {
+    transition: color 0.5s ease;
+}
+
+.lyrics-line.active:not(.lyrics-gap) .lyrics-syllable {
+    transform: translateY(0.001%) translateZ(1px);
+    transition: transform 1s ease;
+    color: var(--lyplus-text-primary, #fff);
+}
+
+#lyrics-plus-container.use-background-wipe .lyrics-syllable,
+#lyrics-plus-container.use-background-wipe .lyrics-syllable span.char {
+    -webkit-mask-image: none !important;
+    mask-image: none !important;
+}
+
+.lyrics-line.active .lyrics-syllable span.char {
+    transition: none !important;
+}
+#lyrics-plus-container.use-background-wipe .lyrics-line.active:not(.lyrics-gap) .lyrics-syllable:not(.finished) {
+    color: var(--lyplus-text-secondary);
+}
+
+#lyrics-plus-container.use-background-wipe .lyrics-line.active:not(.lyrics-gap) .lyrics-syllable.finished,
+#lyrics-plus-container.use-background-wipe .lyrics-line.active:not(.lyrics-gap) .lyrics-syllable.finished span.char {
+    color: var(--lyplus-text-primary, #fff);
+}
+
+#lyrics-plus-container.use-background-wipe .lyrics-line.active:not(.lyrics-gap) .lyrics-syllable span.char {
+    color: inherit;
+}
+
+.lyrics-line.active:not(.lyrics-gap) .lyrics-syllable.highlight,
+.lyrics-line.active:not(.lyrics-gap) .lyrics-syllable.pre-highlight {
+    color: var(--lyplus-text-primary, #fff);
+    transition: transform 1s ease;
+}
+
+.lyrics-line.active:not(.lyrics-gap) .lyrics-syllable.highlight.rtl-text,
+.lyrics-line.active:not(.lyrics-gap) .lyrics-syllable.pre-highlight.rtl-text {
+    direction: rtl;
+}
+
+#lyrics-plus-container:not(.lightweight-mode) .lyrics-line.active:not(.lyrics-gap) .lyrics-word:not(.growable) .lyrics-syllable.highlight,
+#lyrics-plus-container:not(.lightweight-mode) .lyrics-word.growable .lyrics-syllable.cleanup span.char {
+    transform: translateY(var(--lyplus-lyrics-elevation)) translateZ(1px);
+}
+
+#lyrics-plus-container.use-background-wipe .lyrics-syllable.cleanup span.char,
+#lyrics-plus-container.use-background-wipe .lyrics-line.active:not(.lyrics-gap) span.char {
+    transition: none !important;
+}
+
+.lyrics-line.active:not(.lyrics-gap) .lyrics-syllable.finished {
+    color: var(--lyplus-text-primary, #fff);
+}
+
+.lyrics-syllable-wrap.has-translit {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: start;
+}
+
+.lyrics-syllable.transliteration.rtl-text {
+    direction: rtl;
+    unicode-bidi: plaintext;
+}
+
+.lyrics-syllable-wrap.has-translit-rtl {
+    align-items: end;
+}
+
+.lyrics-syllable.transliteration {
+    font-size: var(--lyplus-font-size-subtext);
+    white-space: pre-wrap;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+.lyrics-syllable.transliteration.hidden {
+    display: none;
+}
+
+.lyrics-word.has-translit .lyrics-syllable:not(.transliteration) {
+    line-height: 1.5em;
+}
+
+/* ==========================================================================
+   CHARACTER-LEVEL ANIMATION
+   ========================================================================== */
+
+.lyrics-line .lyrics-syllable span.char {
+    display: inline-block;
+    padding: 0.5em 0.1em;
+    margin: -0.5em -0.1em;
+    color: var(--lyplus-text-secondary);
+    white-space: break-spaces;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0;
+    transition: color 0.5s ease, background-color 0.5s ease, transform 0.7s ease;
+}
+
+.lyrics-line.active:not(.lyrics-gap) .lyrics-syllable span.char {
+    color: inherit;
+}
+
+.lyrics-line .lyrics-syllable.finished span.char {
+    color: var(--lyplus-text-primary);
+}
+
+.lyrics-line:not(.active) .lyrics-syllable.finished span.char {
+    transition: color 0.5s ease, background-color 0.5s ease;
+}
+
+.lyrics-line.active .lyrics-syllable span.char {
+    transform-origin: 50% 80%;
+    transform: translate3d(0, 0, 1px) scale(1.0001);
+    will-change: transform;
+}
+
+.lyrics-line.active .lyrics-syllable.highlight.finished span.char {
+    color: var(--lyplus-text-primary, #fff);
+}
+
+.lyrics-line.lyrics-gap {
+    height: 0;
+    padding: 0 var(--lyplus-padding-gap);
+    box-sizing: border-box;
+    overflow: visible;
+    content-visibility: visible;
+    opacity: 0;
+    background-clip: unset;
+    transition: opacity .2s .5s, transform .3s var(--lyrics-line-delay, 0ms);
+}
+
+.lyrics-line.lyrics-gap.gap-open {
+    height: calc(1em + 2 * var(--lyplus-padding-gap));
+}
+
+.lyrics-line.lyrics-gap.active {
+    opacity: 1;
+    transition: opacity .2s .3s, transform .3s;
+}
+
+.lyrics-line.lyrics-gap .main-vocal-container {
+    position: relative;
+    top: var(--lyplus-padding-gap); /* was the line's padding-top */
+    transform: translateY(-25%) scale(1) translateZ(0);
+}
+
+.lyrics-line.lyrics-gap:not(.active) .main-vocal-container {
+    animation: gap-ended 0.8s ease;
+    transform: translateY(-25%) scale(0) translateZ(0);
+}
+
+.lyrics-line.lyrics-gap:not(.active) .main-vocal-container .lyrics-word {
+    animation-play-state: paused;
+}
+
+.lyrics-line.lyrics-gap.active .main-vocal-container .lyrics-word {
+    animation: gap-loop 4s ease infinite alternate;
+    will-change: transform;
+}
+
+.lyrics-line.lyrics-gap .lyrics-syllable {
+    display: inline-block;
+    width: var(--lyplus-gap-dot-size);
+    height: var(--lyplus-gap-dot-size);
+    padding: 0 !important;
+    margin: 0 var(--lyplus-gap-dot-margin) !important;
+    overflow: hidden;
+    border-radius: 1em;
+    background-color: var(--lyplus-text-secondary);
+    background-clip: unset;
+    -webkit-mask-image: none !important;
+    mask-image: none !important;
+    position: relative;
+    transition: transform 0.7s ease;
+    color: transparent;
+}
+
+/* "lit" colour lives on an overlay: only opacity (compositor) is animated, not background-color (repaint) */
+.lyrics-line.lyrics-gap .lyrics-syllable::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-color: var(--lyplus-text-primary);
+    opacity: 0;
+    transition: opacity 0.7s;
+}
+
+.lyrics-line.lyrics-gap.active .lyrics-syllable.highlight::after,
+.lyrics-line.lyrics-gap.active .lyrics-syllable.finished::after,
+.lyrics-line.lyrics-gap:not(.active).post-active-line .lyrics-syllable::after,
+.lyrics-line.lyrics-gap:not(.active).lyrics-activest .lyrics-syllable::after {
+    opacity: 1;
+}
+
+.lyrics-line.lyrics-gap.active .lyrics-syllable.highlight::after {
+    animation: fade-gap var(--lyplus-gap-duration, 1000ms) var(--lyplus-fade-gap-timing-function, cubic-bezier(0.25, 0.1, 0.25, 1)) forwards;
+}
+
+.lyrics-line.lyrics-gap.active .lyrics-syllable.finished::after {
+    animation: none !important;
+}
+
+/* ==========================================================================
+   METADATA & STATUS MESSAGES
+   ========================================================================== */
+
+/* --- Song Writers & Source Provider --- */
+.lyrics-plus-metadata {
+    display: block;
+    position: relative;
+    box-sizing: border-box;
+    padding: 0 var(--lyplus-padding-line);
+    font-weight: normal;
+    transform: translateY(var(--lyrics-scroll-offset, 0px)) translateZ(1px);
+    transition: opacity 0.3s ease, transform 0.6s cubic-bezier(0.23, 1, 0.32, 1) var(--lyrics-line-delay, 0ms), filter 0.3s ease;
+    transition-delay: var(--lyrics-line-delay, 0ms);
+}
+
+span.lyrics-song-writters {
+    display: block;
+    margin-top: var(--lyplus-padding-base);
+    font-size: var(--lyplus-font-size-metadata);
+    opacity: 0.45;
+}
+
+span.lyrics-source-provider {
+    display: block;
+    height: 150%;
+    margin-bottom: var(--lyplus-padding-base);
+    font-size: var(--lyplus-font-size-provider);
+    opacity: 0.25;
+}
+
+.lyrics-plus-empty {
+    display: block;
+    height: 100vh;
+    transform: translateY(var(--lyrics-scroll-offset, 0px)) translateZ(1px);
+    transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1) var(--lyrics-line-delay, 0ms);
+    transition-delay: var(--lyrics-line-delay, 0ms);
+}
+
+.lyrics-plus-empty-fixed {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    pointer-events: none;
+    transform: none !important;
+}
+
+#lyrics-plus-container .text-not-found {
+    display: block;
+    position: absolute;
+    top: 30%;
+    width: 100%;
+    text-align: center;
+    font-size: var(--lyplus-font-size-status);
+    letter-spacing: 1px;
+    text-shadow: 0 2px 10px rgba(255, 255, 255, 0.2);
+    opacity: 0.7;
+    animation: fadeInUp 0.6s ease-out;
+    transition: opacity 0.3s ease;
+}
+
+#lyrics-plus-container .loading-container {
+    position: absolute;
+    top: 30%;
+    width: 100%;
+    text-align: center;
+    font-size: var(--lyplus-font-size-button);
+    letter-spacing: 1px;
+    text-shadow: 0 2px 10px rgba(255, 255, 255, 0.2);
+    transition: opacity 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column-reverse;
+    opacity: 0.7;
+}
+
+#lyrics-plus-container .loading-loop-m3,
+#lyrics-plus-buttons-wrapper .loading-loop-m3 {
+    mask-image: url(../../assets/loading.gif);
+    position: relative;
+    display: block;
+    height: 80px;
+    width: 80px;
+    margin: 10px;
+    mask-size: contain;
+    background-color: var(--yt-spec-text-primary, var(--lyplus-text-primary, #fff));
+    animation: fadeInUp 0.5s ease;
+    mask-repeat: no-repeat;
+    mask-position: center;
+}
+
+#lyrics-plus-buttons-wrapper .loading-loop-m3 {
+    width: 30px;
+    height: 30px;
+    margin: 0;
+    animation: none;
+}
+
+/* ==========================================================================
+   TRANSLATION & ROMANIZATION FEATURE
+   ========================================================================== */
+
+/* --- Buttons --- */
+#lyrics-plus-buttons-wrapper {
+    display: none;
+    position: absolute;
+    bottom: 1em;
+    right: 1em;
+    width: 20%;
+    box-sizing: border-box;
+    justify-content: center;
+    gap: 10px;
+}
+
+#lyrics-plus-translate-button,
+#lyrics-plus-reload-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 20%;
+    fill: rgba(255, 255, 255, 0.87);
+    background-color: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(6px);
+    font-size: 18px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+#lyrics-plus-translate-button:hover,
+#lyrics-plus-reload-button:hover {
+    background-color: rgba(255, 255, 255, 0.16);
+    transform: scale(1.1);
+}
+
+#lyrics-plus-translate-button:active,
+#lyrics-plus-reload-button:active {
+    background-color: rgba(255, 255, 255, 0.24);
+    transform: scale(0.95);
+}
+
+/* --- Dropdown Menu --- */
+#lyrics-plus-translation-dropdown,
+#lyrics-plus-options-dropdown {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    z-index: 999;
+    min-width: 175px;
+    padding: 4px 0;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background-color: rgba(24, 24, 24, 0.96);
+    backdrop-filter: blur(16px);
+    font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    user-select: none;
+    height: max-content;
+}
+
+#lyrics-plus-translation-dropdown.hidden,
+#lyrics-plus-options-dropdown.hidden {
+    display: none;
+}
+
+.dropdown-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    color: rgba(255, 255, 255, 0.87);
+    font-size: 13px;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    gap: 12px;
+}
+
+.dropdown-option:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.dropdown-option:active {
+    background-color: rgba(255, 255, 255, 0.14);
+}
+
+.dropdown-item-label {
+    flex: 1;
+    white-space: nowrap;
+}
+
+.dropdown-item-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.lyrics-option-value-preview {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    font-variant-numeric: tabular-nums;
+}
+
+.dropdown-chevron-svg,
+.dropdown-item-icon-svg {
+    fill: currentColor;
+    flex-shrink: 0;
+}
+
+.dropdown-header-back {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.87);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.dropdown-header-back:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.dropdown-back-svg {
+    fill: currentColor;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.dropdown-separator {
+    height: 1px;
+    background-color: rgba(255, 255, 255, 0.08);
+    margin: 4px 0;
+}
+
+.lyrics-source-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.lyrics-source-option.selected {
+    color: #fff;
+    font-weight: 500;
+}
+
+.dropdown-check-svg {
+    fill: #fff;
+    flex-shrink: 0;
+}
+
+/* --- Inline Offset Panel inside Dropdown --- */
+.dropdown-offset-panel {
+    padding: 8px 12px 10px;
+}
+
+.offset-display-row {
+    text-align: center;
+    margin: 2px 0 10px;
+}
+
+.offset-current-value {
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+    letter-spacing: -0.3px;
+}
+
+.offset-stepper-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.offset-step-pill {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.87);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 6px 0;
+    text-align: center;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    font-family: inherit;
+}
+
+.offset-step-pill:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
+}
+
+.offset-step-pill:active {
+    background: rgba(255, 255, 255, 0.24);
+}
+
+.offset-reset-row {
+    text-align: center;
+    margin-top: 2px;
+}
+
+.offset-reset-link {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 3px 8px;
+    border-radius: 4px;
+    transition: color 0.15s ease;
+    font-family: inherit;
+}
+
+.offset-reset-link:hover {
+    color: rgba(255, 255, 255, 0.87);
+}
+
+/* --- Lyrics Toast Notification --- */
+.lyrics-plus-toast {
+    position: absolute;
+    bottom: 5em;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1001;
+    background: rgba(30, 30, 30, 0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 12px;
+    padding: 7px 14px;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+    white-space: nowrap;
+    animation: lyplus-toast-in 0.2s ease-out;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.lyrics-plus-toast.fade-out {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+}
+
+@keyframes lyplus-toast-in {
+    from {
+        opacity: 0;
+        transform: translate(-50%, 6px);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+}
+
+/* --- Translated/Romanized Text --- */
+.lyrics-translation-container,
+.lyrics-romanization-container {
+    padding-top: 0.2em;
+    opacity: 0.8;
+    font-size: var(--lyplus-font-size-subtext);
+    overflow-wrap: break-word;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    transition: opacity 0.3s ease, color 0.3s;
+}
+
+.lyrics-translation-container {
+    opacity: 0.5;
+}
+
+.lyrics-romanization-container {
+    direction: ltr !important;
+    unicode-bidi: plaintext;
+    text-align: start;
+}
+
+.lyrics-romanization-container.rtl-text {
+    direction: rtl !important;
+}
+
+/* Case B: LTR transliteration under RTL (Arabic/Hebrew) line -> right-align */
+.lyrics-line.rtl-text .lyrics-romanization-container:not(.rtl-text) {
+    direction: ltr;
+    unicode-bidi: plaintext;
+    text-align: end;
+}
+
+/* Case C: RTL transliteration under LTR line ("flipped") -> right-align */
+.lyrics-line:not(.rtl-text) .lyrics-romanization-container.rtl-text {
+    direction: rtl;
+    unicode-bidi: embed;
+    text-align: start;
+}
+
+/* Case D: RTL transliteration under RTL line -> right-align */
+.lyrics-line.rtl-text .lyrics-romanization-container.rtl-text {
+    direction: rtl;
+    unicode-bidi: embed;
+    text-align: start;
+}
+
+/* --- Translation container: break out of parent RTL direction ---
+   Four cases based on parent line direction and translation text direction:
+   A) LTR line  + LTR translation  → left-align,  direction: ltr  (default)
+   B) RTL line  + LTR translation  → right-align, direction: ltr
+   C) LTR line  + RTL translation  → right-align, direction: rtl  (.rtl-text on container)
+   D) RTL line  + RTL translation  → right-align, direction: rtl
+   JS adds .rtl-text to the container when translatedText contains RTL chars. */
+
+/* Case A: LTR translation under LTR line (default) */
+.lyrics-translation-container {
+    direction: ltr;
+    unicode-bidi: plaintext;
+    text-align: start;
+}
+
+/* Case B: LTR translation under RTL line */
+.lyrics-line.rtl-text .lyrics-translation-container:not(.rtl-text) {
+    direction: ltr;
+    unicode-bidi: plaintext;
+    text-align: end;
+}
+
+.lyrics-line.rtl-text.singer-right .lyrics-translation-container:not(.rtl-text) {
+    text-align: start;
+}
+
+/* Case C: RTL translation under LTR line ("flipped" — e.g. Arabic is the translation) */
+.lyrics-line:not(.rtl-text) .lyrics-translation-container.rtl-text {
+    direction: rtl;
+    unicode-bidi: embed;
+    text-align: start;
+}
+
+/* Case D: RTL translation under RTL line */
+.lyrics-line.rtl-text .lyrics-translation-container.rtl-text {
+    direction: rtl;
+    unicode-bidi: embed;
+    text-align: start;
+}
+
+/* LTR singer-right: line is right-aligned, LTR translation follows */
+.lyrics-line.singer-right:not(.rtl-text) .lyrics-translation-container:not(.rtl-text) {
+    text-align: end;
+}
+
+/* --- Romanization alignment for dual-direction / dual-side mode ---  */
+
+/* mixed-direction + dual-side: RTL singer-right text is explicitly
+   right-aligned, so romanization (always LTR) must mirror that. */
+#lyrics-plus-container.mixed-direction-lyrics.dual-side-lyrics
+    .lyrics-line.rtl-text.singer-right
+    .lyrics-romanization-container {
+    text-align: end;
+}
+
+/* mixed-direction + dual-side: RTL singer-left text is left-aligned */
+#lyrics-plus-container.mixed-direction-lyrics.dual-side-lyrics
+    .lyrics-line.rtl-text.singer-left
+    .lyrics-romanization-container {
+    text-align: start;
+}
+
+/* Non-mixed dual-side: RTL singer-right is pushed right via padding-left;
+   romanization stays left-aligned so it tracks under the Arabic glyphs. */
+#lyrics-plus-container.dual-side-lyrics:not(.mixed-direction-lyrics)
+    .lyrics-line.rtl-text.singer-right
+    .lyrics-romanization-container {
+    text-align: start;
+}
+
+/* Non-mixed dual-side: RTL singer-left is pushed left via padding-right */
+#lyrics-plus-container.dual-side-lyrics:not(.mixed-direction-lyrics)
+    .lyrics-line.rtl-text.singer-left
+    .lyrics-romanization-container {
+    text-align: end;
+}
+
+.lyrics-romanization-container .lyrics-syllable {
+    white-space: pre-wrap;
+}
+
+/* ==========================================================================
+   ENHANCED BACKGROUND & DYNAMIC PLAYER LAYOUT
+   ========================================================================== */
+
+@property --webgl-post-process-tick {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0;
+}
+
+.lyplus-blur-container {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    content-visibility: auto;
+    contain-intrinsic-size: 100% 100%;
+    --webgl-post-process: brightness(0.7) saturate(3) contrast(0.95);
+    --webgl-post-process-tick: 0;
+}
+
+.lyplus-blur-container::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 29;
+    width: 100%;
+    height: 100%;
+    background-color: #50505027;
+}
+
+canvas#lyplus-webgl-canvas {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    min-width: 100vw;
+    min-height: 100vh;
+    transform: translate(-50%, -50%);
+}
+
+@keyframes gap-loop {
+    from {
+        transform: scale(1.1);
+    }
+    to {
+        transform: scale(0.9);
+    }
+}
+
+@keyframes gap-ended {
+    0% {
+        transform: translateY(-25%) scale(1) translateZ(0);
+    }
+    35% {
+        transform: translateY(-25%) scale(1.2) translateZ(0);
+    }
+    100% {
+        transform: translateY(-25%) scale(0) translateZ(0);
+    }
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 0.7;
+        transform: translateY(0);
+    }
+}
+
+/* Emphasis glow: painted once on a pseudo-element, only opacity is animated. */
+.lyrics-line .lyrics-syllable span.char.emphasis-active {
+    position: relative;
+    transform-origin: 50% 80%;
+}
+
+.lyrics-syllable span.char.emphasis-active[data-glow]::after {
+    content: attr(data-glyph);
+    position: absolute;
+    inset: 0;
+    padding: 0.5em 0.1em;
+    white-space: break-spaces;
+    pointer-events: none;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 0.2em rgb(255 255 255 / var(--char-glow-max, 0));
+    animation: char-glow var(--char-glow-duration) linear var(--char-glow-delay) both;
+    z-index: -1;
+}
+
+@keyframes char-glow {
+    0%,
+    100% {
+        opacity: 0;
+    }
+    15% {
+        opacity: 0.8;
+    }
+    30% {
+        opacity: 1;
+    }
+    60% {
+        opacity: 0.3;
+    }
+}
+
+@keyframes fade-gap {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
