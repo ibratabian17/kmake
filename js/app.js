@@ -335,14 +335,67 @@ function buildAllSyllables() {
     allSyllables = []
     for (let li = 0; li < tempLyrics.length; li++) {
         const line = tempLyrics[li]
-        if (!line || line.isTaggedLine) continue
+        if (!line) continue
+        line.lineIndex = li
+        if (line.isTaggedLine) continue
         const syllabus = line.syllabus || []
         for (let si = 0; si < syllabus.length; si++) {
+            const wordIdx = allSyllables.length
             allSyllables.push({ lineIdx: li, syllabusIdx: si })
+            const syl = syllabus[si]
+            if (syl) {
+                syl._wordIndex = wordIdx
+                if (syl.element) {
+                    syl.element.id = 'syl-' + li + '-' + si
+                    syl.element.dataset.lineIdx = String(li)
+                    syl.element.dataset.sylIdx = String(si)
+                    syl.element.dataset.wordIndex = String(wordIdx)
+                }
+            }
         }
     }
     // Virtual ENDOFLINE entry lets Enter seal the last syllable's duration.
-    allSyllables.push({ lineIdx: -1, syllabusIdx: -1, isEndOfLine: true })
+    if (allSyllables.length > 0) {
+        allSyllables.push({ lineIdx: -1, syllabusIdx: -1, isEndOfLine: true })
+    }
+    _syncDomSelectionClasses()
+}
+
+function _syncDomSelectionClasses() {
+    document.querySelectorAll('#lyrics-content .current-word').forEach(el => el.classList.remove('current-word'))
+    document.querySelectorAll('#lyrics-content .opened-word').forEach(el => el.classList.remove('opened-word'))
+
+    if (currentWordIndex >= 0 && currentWordIndex < allSyllables.length) {
+        const curEntry = allSyllables[currentWordIndex]
+        if (curEntry && !curEntry.isEndOfLine && curEntry.lineIdx >= 0) {
+            const curSyl = tempLyrics[curEntry.lineIdx]?.syllabus[curEntry.syllabusIdx]
+            if (curSyl?.element) curSyl.element.classList.add('current-word')
+        }
+    }
+
+    if (typeof selectedWordIndices !== 'undefined' && selectedWordIndices.size > 0) {
+        const valid = Array.from(selectedWordIndices).filter(i => i >= 0 && i < allSyllables.length && !allSyllables[i]?.isEndOfLine)
+        if (valid.length === 0) {
+            selectedWordIndices.clear()
+            selectedWordIndex = -1
+            return
+        }
+        selectedWordIndices = new Set(valid)
+        if (!selectedWordIndices.has(selectedWordIndex)) selectedWordIndex = valid[0]
+        valid.forEach(idx => {
+            const e = allSyllables[idx]
+            const s = tempLyrics[e.lineIdx]?.syllabus[e.syllabusIdx]
+            if (s?.element) s.element.classList.add('opened-word')
+        })
+    } else if (selectedWordIndex >= 0) {
+        if (selectedWordIndex < allSyllables.length && !allSyllables[selectedWordIndex]?.isEndOfLine) {
+            const e = allSyllables[selectedWordIndex]
+            const s = tempLyrics[e.lineIdx]?.syllabus[e.syllabusIdx]
+            if (s?.element) s.element.classList.add('opened-word')
+        } else {
+            selectedWordIndex = -1
+        }
+    }
 }
 
 function importSong() {
@@ -754,6 +807,9 @@ function rebuildLyricsDOM() {
                     span.classList.add('done-word')
                     span.style.setProperty('--duration', (syl.duration || 0) + 'ms')
                 }
+                span.dataset.lineIdx = String(li)
+                span.dataset.sylIdx = String(si)
+                if (syl._wordIndex !== undefined) span.dataset.wordIndex = String(syl._wordIndex)
                 syl.element = span
                 p.appendChild(span)
             })
@@ -761,6 +817,7 @@ function rebuildLyricsDOM() {
         elem_lyricsContent.appendChild(p)
         lineDisplayIdx++
     })
+    buildAllSyllables()
 }
 
 function _seekToFirstUnsynced() {
@@ -768,13 +825,14 @@ function _seekToFirstUnsynced() {
     for (let i = 0; i < allSyllables.length; i++) {
         const entry = allSyllables[i]
         if (entry.isEndOfLine) continue
-        const syl = tempLyrics[entry.lineIdx].syllabus[entry.syllabusIdx]
-        if (syl.isBackground) continue
+        const syl = tempLyrics[entry.lineIdx]?.syllabus[entry.syllabusIdx]
+        if (!syl) continue
         if (!syl.isDone) {
             currentWordIndex = i
             break
         }
     }
+    _syncDomSelectionClasses()
 }
 
 function cleanText(text) {
@@ -854,11 +912,11 @@ function alignLines(oldLines, newLines) {
     }
 
     let i = M, j = N
-    const lineMatchMap = new Map()
+    const pairs = []
     while (i > 0 && j > 0) {
         const ms = matchScores[i - 1][j - 1]
         if (ms > 0 && Math.abs(dp[i][j] - (dp[i - 1][j - 1] + ms)) < 1e-6) {
-            lineMatchMap.set(j - 1, oldLines[i - 1])
+            pairs.push([i - 1, j - 1])
             i--
             j--
         } else if (dp[i - 1][j] >= dp[i][j - 1]) {
@@ -867,6 +925,27 @@ function alignLines(oldLines, newLines) {
             j--
         }
     }
+    pairs.reverse()
+
+    const lineMatchMap = new Map()
+    for (const [oi, nj] of pairs) {
+        lineMatchMap.set(nj, oldLines[oi])
+    }
+
+    // Pair equal-length unmatched line gaps between matched anchors so heavily edited lines keep timing.
+    const anchors = [[-1, -1], ...pairs, [M, N]]
+    for (let a = 0; a < anchors.length - 1; a++) {
+        const [oStart, nStart] = anchors[a]
+        const [oEnd, nEnd] = anchors[a + 1]
+        const oCount = oEnd - oStart - 1
+        const nCount = nEnd - nStart - 1
+        if (oCount > 0 && oCount === nCount) {
+            for (let k = 1; k <= oCount; k++) {
+                lineMatchMap.set(nStart + k, oldLines[oStart + k])
+            }
+        }
+    }
+
     return lineMatchMap
 }
 
@@ -899,6 +978,16 @@ function parseLyrics() {
 
     elem_lyricsContent.innerHTML = ''
 
+    const prevSelectedEntry = (selectedWordIndex >= 0 && selectedWordIndex < allSyllables.length && !allSyllables[selectedWordIndex]?.isEndOfLine)
+        ? { lineObj: tempLyrics[allSyllables[selectedWordIndex].lineIdx], sylIdx: allSyllables[selectedWordIndex].syllabusIdx }
+        : null
+    const prevMultiEntries = (typeof selectedWordIndices !== 'undefined' && selectedWordIndices.size > 1)
+        ? Array.from(selectedWordIndices)
+            .filter(idx => idx >= 0 && idx < allSyllables.length && !allSyllables[idx]?.isEndOfLine)
+            .map(idx => ({ lineObj: tempLyrics[allSyllables[idx].lineIdx], sylIdx: allSyllables[idx].syllabusIdx }))
+        : []
+    const oldSylToNewMap = new Map()
+
     const oldLyricLines = tempLyrics.filter(l => !l.isTaggedLine)
 
     metadata.songParts = []
@@ -912,9 +1001,24 @@ function parseLyrics() {
     const rawLines = elem_lyricsInput.value.split('\n')
 
     rawLines.forEach(l => {
-        const decl = extractAgentDeclaration(l.trim())
+        const trimmed = l.trim()
+        const decl = extractAgentDeclaration(trimmed)
         if (decl) {
             metadata.agents[decl.alias] = { type: decl.type, name: decl.name, alias: decl.alias }
+            return
+        }
+        if (trimmed && !isValidTag(trimmed)) {
+            const inlineAgentMatch = trimmed.match(/^(v\d+):/i)
+            if (inlineAgentMatch) {
+                const alias = inlineAgentMatch[1].toLowerCase()
+                if (!metadata.agents[alias]) {
+                    metadata.agents[alias] = {
+                        type: alias === 'v1000' ? 'group' : (alias === 'v2000' ? 'other' : 'person'),
+                        name: '',
+                        alias
+                    }
+                }
+            }
         }
     })
 
@@ -948,12 +1052,11 @@ function parseLyrics() {
 
         const sortedAliases = Object.keys(metadata.agents).sort((a, b) => b.length - a.length)
         for (const alias of sortedAliases) {
-            if (actualLineText.trim().startsWith(alias + ':')) {
+            const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            const prefixMatch = actualLineText.match(new RegExp(`^\\s*${escapedAlias}:`, 'i'))
+            if (prefixMatch) {
                 lineSinger = alias
-                const prefixMatch = actualLineText.match(new RegExp(`^\\s*${alias}:`))
-                if (prefixMatch) {
-                    actualLineText = actualLineText.substring(prefixMatch[0].length)
-                }
+                actualLineText = actualLineText.substring(prefixMatch[0].length)
                 break
             }
         }
@@ -975,7 +1078,8 @@ function parseLyrics() {
     let lyricItemIdx = 0
 
     parsedLinesInfo.forEach((info) => {
-        const { lineIndex, trimmed, isTagOrAgent, agentDecl, isSongPartTag, lineSinger, actualLineText } = info
+        const { trimmed, isTagOrAgent, agentDecl, isSongPartTag, lineSinger, actualLineText } = info
+        const li = newLyrics.length
 
         const p = document.createElement('p')
         p.classList.add('lyrics-line')
@@ -990,12 +1094,12 @@ function parseLyrics() {
             const span = document.createElement('span')
             span.classList.add('lyrics-word')
             span.innerText = trimmed
-            span.id = 'line-tag-' + lineIndex
+            span.id = 'line-' + li
             p.appendChild(span)
             newLyrics.push({
                 time: 0, duration: 0, text: trimmed, syllabus: [],
-                element: { key: 'tag-' + lineIndex, singer: null, songPartIndex: currentSongPartIndex },
-                isTaggedLine: true, tag: currentTag, lineIndex: lineIndex, lineElement: p
+                element: { key: 'tag-' + li, singer: null, songPartIndex: currentSongPartIndex },
+                isTaggedLine: true, tag: currentTag, lineIndex: li, lineElement: p
             })
             elem_lyricsContent.appendChild(p)
             lineDisplayIdx++
@@ -1008,6 +1112,7 @@ function parseLyrics() {
         const oldLine = lineMatchMap.get(lyricItemIdx) || null
         lyricItemIdx++
 
+        const lineSylMap = new Map()
         if (oldLine && oldLine.syllabus) {
             const oldSyls = oldLine.syllabus
             const O = oldSyls.length
@@ -1036,9 +1141,11 @@ function parseLyrics() {
                     ni--
                 }
             }
+            matches.reverse()
 
             for (const [oldIdx, newIdx] of matches) {
                 const oldSyl = oldSyls[oldIdx]
+                lineSylMap.set(oldIdx, newIdx)
                 syllabus[newIdx].isBackground = !!oldSyl.isBackground
                 if (oldSyl.romanizedText) syllabus[newIdx].romanizedText = oldSyl.romanizedText
                 if (oldSyl.isDone) {
@@ -1047,6 +1154,104 @@ function parseLyrics() {
                     syllabus[newIdx].isDone = oldSyl.isDone
                 }
             }
+
+            // Handle edited words, syllable splits (]), and syllable merges in unmatched gaps between anchors.
+            const anchors = [[-1, -1], ...matches, [O, N]]
+            for (let a = 0; a < anchors.length - 1; a++) {
+                const [oStart, nStart] = anchors[a]
+                const [oEnd, nEnd] = anchors[a + 1]
+                const oCount = oEnd - oStart - 1
+                const nCount = nEnd - nStart - 1
+                if (oCount <= 0 || nCount <= 0) continue
+
+                if (oCount === nCount) {
+                    // 1-to-1 or K-to-K modified word(s) in place
+                    for (let k = 1; k <= oCount; k++) {
+                        const oIdx = oStart + k
+                        const nIdx = nStart + k
+                        const oldSyl = oldSyls[oIdx]
+                        lineSylMap.set(oIdx, nIdx)
+                        syllabus[nIdx].isBackground = !!oldSyl.isBackground
+                        if (oldSyl.isDone) {
+                            syllabus[nIdx].time = oldSyl.time
+                            syllabus[nIdx].duration = oldSyl.duration
+                            syllabus[nIdx].isDone = true
+                        }
+                    }
+                } else if (oCount === 1 && nCount > 1) {
+                    // 1 old word split into multiple syllables (e.g. botol -> bo]tol)
+                    const oIdx = oStart + 1
+                    const oldSyl = oldSyls[oIdx]
+                    lineSylMap.set(oIdx, nStart + 1)
+                    const weights = []
+                    for (let k = 1; k <= nCount; k++) {
+                        const w = Math.max(1, (syllabus[nStart + k].text || '').replace(/]/g, '').trim().length)
+                        weights.push(w)
+                    }
+                    const totalWeight = weights.reduce((acc, v) => acc + v, 0) || nCount
+                    let curT = oldSyl.time || 0
+                    const totalDur = oldSyl.duration || 0
+                    for (let k = 1; k <= nCount; k++) {
+                        const nIdx = nStart + k
+                        syllabus[nIdx].isBackground = !!oldSyl.isBackground
+                        if (oldSyl.isDone) {
+                            const dur = totalDur > 0 ? Math.round(totalDur * (weights[k - 1] / totalWeight)) : 0
+                            syllabus[nIdx].time = curT
+                            syllabus[nIdx].duration = dur
+                            syllabus[nIdx].isDone = true
+                            curT += dur
+                        }
+                    }
+                } else if (oCount > 1 && nCount === 1) {
+                    // Multiple old syllables merged into 1 word (e.g. bo]tol -> botol)
+                    const nIdx = nStart + 1
+                    const oldSlice = []
+                    for (let k = 1; k <= oCount; k++) {
+                        lineSylMap.set(oStart + k, nIdx)
+                        oldSlice.push(oldSyls[oStart + k])
+                    }
+                    syllabus[nIdx].isBackground = oldSlice.every(s => s.isBackground)
+                    const doneSlice = oldSlice.filter(s => s.isDone && s.time > 0)
+                    if (doneSlice.length > 0) {
+                        const startT = Math.min(...doneSlice.map(s => s.time))
+                        const endT = Math.max(...doneSlice.map(s => s.time + (s.duration || 0)))
+                        syllabus[nIdx].time = startT
+                        syllabus[nIdx].duration = Math.max(0, endT - startT)
+                        syllabus[nIdx].isDone = true
+                    }
+                } else {
+                    // General K-to-M edit in gap
+                    const oldSlice = []
+                    for (let k = 1; k <= oCount; k++) {
+                        const mappedN = nStart + Math.min(nCount, k)
+                        lineSylMap.set(oStart + k, mappedN)
+                        oldSlice.push(oldSyls[oStart + k])
+                    }
+                    const allBg = oldSlice.every(s => s.isBackground)
+                    const doneSlice = oldSlice.filter(s => s.isDone && s.time > 0)
+                    if (doneSlice.length > 0) {
+                        const startT = Math.min(...doneSlice.map(s => s.time))
+                        const endT = Math.max(...doneSlice.map(s => s.time + (s.duration || 0)))
+                        const totalDur = Math.max(0, endT - startT)
+                        const weights = []
+                        for (let k = 1; k <= nCount; k++) {
+                            weights.push(Math.max(1, (syllabus[nStart + k].text || '').replace(/]/g, '').trim().length))
+                        }
+                        const totalWeight = weights.reduce((acc, v) => acc + v, 0) || nCount
+                        let curT = startT
+                        for (let k = 1; k <= nCount; k++) {
+                            const nIdx = nStart + k
+                            syllabus[nIdx].isBackground = allBg
+                            const dur = totalDur > 0 ? Math.round(totalDur * (weights[k - 1] / totalWeight)) : 0
+                            syllabus[nIdx].time = curT
+                            syllabus[nIdx].duration = dur
+                            syllabus[nIdx].isDone = true
+                            curT += dur
+                        }
+                    }
+                }
+            }
+            oldSylToNewMap.set(oldLine, { newLineIdx: li, lineSylMap })
         }
 
         const lineText = words.join('')
@@ -1058,7 +1263,9 @@ function parseLyrics() {
             const span = document.createElement('span')
             span.classList.add('lyrics-word')
             span.innerText = (syl.text || '').replace(/]/g, '')
-            span.id = 'syl-' + lineIndex + '-' + si
+            span.id = 'syl-' + li + '-' + si
+            span.dataset.lineIdx = String(li)
+            span.dataset.sylIdx = String(si)
             if ((syl.text || '').replace(/]/g, '').trim() === '') span.classList.add('lyrics-space')
             if (isRTL(syl.text)) span.classList.add('rtl-word')
             if (syl.isBackground) span.classList.add('background-word')
@@ -1084,8 +1291,8 @@ function parseLyrics() {
             time: lineTime, duration: lineDur, text: lineText, syllabus: syllabus,
             translatedText: oldLine ? oldLine.translatedText : undefined,
             romanizedText: oldLine ? oldLine.romanizedText : undefined,
-            element: { key: 'L' + lineIndex, singer: lineSinger, songPartIndex: currentSongPartIndex },
-            isTaggedLine: false, tag: null, lineIndex: lineIndex, lineElement: p
+            element: { key: 'L' + lyricItemIdx, singer: lineSinger, songPartIndex: currentSongPartIndex },
+            isTaggedLine: false, tag: null, lineIndex: li, lineElement: p
         })
         elem_lyricsContent.appendChild(p)
         lineDisplayIdx++
@@ -1095,6 +1302,53 @@ function parseLyrics() {
     buildAllSyllables()
     _recalcMissingDurations()
     _seekToFirstUnsynced()
+
+    // Remap active selection if a word or multi-selection was open before editing plainText
+    if (prevMultiEntries.length > 1) {
+        const remappedIndices = []
+        prevMultiEntries.forEach(item => {
+            const mapping = oldSylToNewMap.get(item.lineObj)
+            if (mapping) {
+                const newSi = mapping.lineSylMap.get(item.sylIdx)
+                if (newSi !== undefined) {
+                    const wIdx = allSyllables.findIndex(a => a.lineIdx === mapping.newLineIdx && a.syllabusIdx === newSi)
+                    if (wIdx !== -1) remappedIndices.push(wIdx)
+                }
+            }
+        })
+        if (remappedIndices.length > 0) {
+            setMultiWordSelection(remappedIndices, remappedIndices[0])
+        } else {
+            unselect()
+        }
+    } else if (prevSelectedEntry && prevSelectedEntry.lineObj) {
+        const mapping = oldSylToNewMap.get(prevSelectedEntry.lineObj)
+        const newSi = mapping ? mapping.lineSylMap.get(prevSelectedEntry.sylIdx) : undefined
+        const wIdx = (mapping && newSi !== undefined)
+            ? allSyllables.findIndex(a => a.lineIdx === mapping.newLineIdx && a.syllabusIdx === newSi)
+            : -1
+        if (wIdx !== -1) {
+            selectedWordIndex = wIdx
+            selectedWordIndices = new Set([wIdx])
+            currentWordIndex = wIdx
+            const entry = allSyllables[wIdx]
+            const line = tempLyrics[entry.lineIdx]
+            const syl = line?.syllabus[entry.syllabusIdx]
+            if (syl) {
+                document.getElementById('properties-word').innerText = syl.text || ''
+                document.getElementById('properties-start').value = syl.time || 0
+                document.getElementById('properties-length').value = syl.duration || 0
+                updateTimeDisplays()
+                const lineTextEl = document.getElementById('properties-line-text')
+                if (lineTextEl) lineTextEl.textContent = (line.text || '').trim() || '(empty line)'
+            }
+            _syncDomSelectionClasses()
+            refreshWordActionButtons()
+        } else {
+            unselect()
+        }
+    }
+
     renderTimeline()
     if (isPreviewActive()) refreshLyricsPlusPreview()
     _markDirtyAndAutoSave()
@@ -1236,6 +1490,7 @@ function openWord(wordIndex) {
     currentWordIndex = wordIndex
     selectedWordIndex = wordIndex
     selectedWordIndices = new Set([wordIndex])
+    goBackIndex = 0
     const wordLabelEl = document.getElementById('props-word-label')
     if (wordLabelEl) wordLabelEl.textContent = 'WORD'
     const multiRetimeEl = document.getElementById('props-multi-retime')
@@ -2256,13 +2511,24 @@ document.addEventListener('keyup', function (event) {
 })
 
 document.addEventListener('click', function (event) {
-    if (event.target.classList.contains('lyrics-word')) {
-        const el = event.target
+    const el = (event.target && event.target.closest)
+        ? event.target.closest('#lyrics-content .lyrics-word')
+        : (event.target && event.target.classList && event.target.classList.contains('lyrics-word') ? event.target : null)
+    if (el) {
         if (el.id && el.id.startsWith('syl-')) {
-            const parts = el.id.split('-')
-            const li = parseInt(parts[1])
-            const si = parseInt(parts[2])
-            const idx = allSyllables.findIndex(a => a.lineIdx === li && a.syllabusIdx === si)
+            let idx = -1
+            if (el.dataset && el.dataset.wordIndex !== undefined) {
+                const parsedW = parseInt(el.dataset.wordIndex, 10)
+                if (!isNaN(parsedW) && parsedW >= 0 && parsedW < allSyllables.length && !allSyllables[parsedW]?.isEndOfLine) {
+                    idx = parsedW
+                }
+            }
+            if (idx === -1) {
+                const parts = el.id.split('-')
+                const li = parseInt(parts[1], 10)
+                const si = parseInt(parts[2], 10)
+                idx = allSyllables.findIndex(a => a.lineIdx === li && a.syllabusIdx === si)
+            }
             if (idx === -1) return
             if (event.ctrlKey || event.metaKey) {
                 const nextSet = new Set(selectedWordIndices)
@@ -3288,8 +3554,25 @@ elem_lyricsInput.addEventListener('input', function () {
     const lines = this.value.split('\n')
     const detectedAgents = {}
     lines.forEach(l => {
-        const d = extractAgentDeclaration(l.trim())
-        if (d) detectedAgents[d.alias] = { type: d.type, name: d.name, alias: d.alias }
+        const trimmed = l.trim()
+        const d = extractAgentDeclaration(trimmed)
+        if (d) {
+            detectedAgents[d.alias] = { type: d.type, name: d.name, alias: d.alias }
+            return
+        }
+        if (trimmed && !isValidTag(trimmed)) {
+            const inlineMatch = trimmed.match(/^(v\d+):/i)
+            if (inlineMatch) {
+                const alias = inlineMatch[1].toLowerCase()
+                if (!metadata.agents[alias] && !detectedAgents[alias]) {
+                    detectedAgents[alias] = {
+                        type: alias === 'v1000' ? 'group' : (alias === 'v2000' ? 'other' : 'person'),
+                        name: '',
+                        alias
+                    }
+                }
+            }
+        }
     })
     if (Object.keys(detectedAgents).length > 0) {
         Object.assign(metadata.agents, detectedAgents)
