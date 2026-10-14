@@ -661,7 +661,7 @@ function rebuildLyricsDOM() {
         p.classList.add('lyrics-line')
 
         if (line.isTaggedLine) {
-            if (line.tag === 'ENDOFLINE') return
+            if (!line.tag || line.tag === 'ENDOFLINE' || extractAgentDeclaration(line.text || '')) return
             p.classList.add('tagged-line')
             p.classList.add(lineDisplayIdx % 2 === 0 ? 'even' : 'odd')
             const span = document.createElement('span')
@@ -855,18 +855,27 @@ function parseLyrics() {
     })
 
     const parsedLinesInfo = []
+    let seenLyricLine = false
     rawLines.forEach((line, lineIndex) => {
         const trimmed = line.trim()
         if (!trimmed) {
-            if (editorSettings.allowSpaceDoubleBracketEndWord) {
+            if (editorSettings.allowSpaceDoubleBracketEndWord && seenLyricLine) {
                 parsedLinesInfo.push({ lineIndex, line: '', trimmed: '', isTagOrAgent: false, lineSinger: 'v1', actualLineText: '' })
             }
             return
         }
-        const isSongPartTag = isValidTag(trimmed)
         const agentDecl = extractAgentDeclaration(trimmed)
-        if (agentDecl || isSongPartTag) {
-            parsedLinesInfo.push({ lineIndex, line, trimmed, isTagOrAgent: true, agentDecl, isSongPartTag })
+        if (agentDecl) {
+            metadata.agents[agentDecl.alias] = {
+                type: agentDecl.type,
+                name: agentDecl.name,
+                alias: agentDecl.alias
+            }
+            return
+        }
+        const isSongPartTag = isValidTag(trimmed)
+        if (isSongPartTag) {
+            parsedLinesInfo.push({ lineIndex, line, trimmed, isTagOrAgent: true, agentDecl: null, isSongPartTag })
             return
         }
 
@@ -885,8 +894,10 @@ function parseLyrics() {
             }
         }
         if (!actualLineText.trim()) {
-            if (!editorSettings.allowSpaceDoubleBracketEndWord) return
+            if (!editorSettings.allowSpaceDoubleBracketEndWord || !seenLyricLine) return
             actualLineText = ''
+        } else {
+            seenLyricLine = true
         }
         parsedLinesInfo.push({ lineIndex, line, trimmed, isTagOrAgent: false, lineSinger, actualLineText })
     })
@@ -905,29 +916,6 @@ function parseLyrics() {
         const p = document.createElement('p')
         p.classList.add('lyrics-line')
         p.classList.add(lineDisplayIdx % 2 === 0 ? 'even' : 'odd')
-
-        if (agentDecl) {
-            metadata.agents[agentDecl.alias] = {
-                type: agentDecl.type,
-                name: agentDecl.name,
-                alias: agentDecl.alias
-            }
-
-            p.classList.add('tagged-line')
-            const span = document.createElement('span')
-            span.classList.add('lyrics-word')
-            span.innerText = trimmed
-            span.id = 'line-tag-' + lineIndex
-            p.appendChild(span)
-            newLyrics.push({
-                time: 0, duration: 0, text: trimmed, syllabus: [],
-                element: { key: 'tag-' + lineIndex, singer: null, songPartIndex: currentSongPartIndex },
-                isTaggedLine: true, tag: null, lineIndex: lineIndex, lineElement: p
-            })
-            elem_lyricsContent.appendChild(p)
-            lineDisplayIdx++
-            return
-        }
 
         if (isSongPartTag) {
             currentTag = extractTagName(trimmed)
@@ -3684,6 +3672,10 @@ function _syncLyricsInputFromModel() {
         if (partIdx >= 0 && partIdx !== prevPartIdx && metadata.songParts[partIdx] && metadata.songParts[partIdx].name) {
             out.push('#' + metadata.songParts[partIdx].name)
             prevPartIdx = partIdx
+        }
+        if ((line.text || '').replace(/]/g, '').trim() === '') {
+            out.push('')
+            return
         }
         const singer = line.element?.singer || 'v1'
         const markup = _syllabusToMarkup(line.syllabus, line.text)
