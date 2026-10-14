@@ -362,16 +362,7 @@ function buildAllSyllables() {
 }
 
 function _syncDomSelectionClasses() {
-    document.querySelectorAll('#lyrics-content .current-word').forEach(el => el.classList.remove('current-word'))
     document.querySelectorAll('#lyrics-content .opened-word').forEach(el => el.classList.remove('opened-word'))
-
-    if (currentWordIndex >= 0 && currentWordIndex < allSyllables.length) {
-        const curEntry = allSyllables[currentWordIndex]
-        if (curEntry && !curEntry.isEndOfLine && curEntry.lineIdx >= 0) {
-            const curSyl = tempLyrics[curEntry.lineIdx]?.syllabus[curEntry.syllabusIdx]
-            if (curSyl?.element) curSyl.element.classList.add('current-word')
-        }
-    }
 
     if (typeof selectedWordIndices !== 'undefined' && selectedWordIndices.size > 0) {
         const valid = Array.from(selectedWordIndices).filter(i => i >= 0 && i < allSyllables.length && !allSyllables[i]?.isEndOfLine)
@@ -387,11 +378,21 @@ function _syncDomSelectionClasses() {
             const s = tempLyrics[e.lineIdx]?.syllabus[e.syllabusIdx]
             if (s?.element) s.element.classList.add('opened-word')
         })
+        const primaryEntry = allSyllables[selectedWordIndex]
+        const primarySyl = primaryEntry ? tempLyrics[primaryEntry.lineIdx]?.syllabus[primaryEntry.syllabusIdx] : null
+        if (primarySyl?.element) {
+            document.querySelectorAll('#lyrics-content .current-word').forEach(el => el.classList.remove('current-word'))
+            primarySyl.element.classList.add('current-word')
+        }
     } else if (selectedWordIndex >= 0) {
         if (selectedWordIndex < allSyllables.length && !allSyllables[selectedWordIndex]?.isEndOfLine) {
             const e = allSyllables[selectedWordIndex]
             const s = tempLyrics[e.lineIdx]?.syllabus[e.syllabusIdx]
-            if (s?.element) s.element.classList.add('opened-word')
+            if (s?.element) {
+                s.element.classList.add('opened-word')
+                document.querySelectorAll('#lyrics-content .current-word').forEach(el => el.classList.remove('current-word'))
+                s.element.classList.add('current-word')
+            }
         } else {
             selectedWordIndex = -1
         }
@@ -1485,26 +1486,15 @@ function nextWord() {
         line.duration = (latestSyl.time + latestSyl.duration) - line.time
     }
 
-    lastWordIndex = currentWordIndex
-    currentWordIndex++
-
-    const nextEntry = (currentWordIndex < allSyllables.length && !allSyllables[currentWordIndex]?.isEndOfLine)
-        ? allSyllables[currentWordIndex]
-        : null
-    const nextSyl = nextEntry ? tempLyrics[nextEntry.lineIdx]?.syllabus[nextEntry.syllabusIdx] : null
-
-    const prevCurrent = document.querySelector('#lyrics-content .current-word')
-    if (prevCurrent) prevCurrent.classList.remove('current-word')
     if (syl.element) {
-        syl.element.classList.add('playing-word')
-    }
-    if (nextSyl?.element) {
-        nextSyl.element.classList.add('current-word')
-        _scrollSyncElementIntoView(nextSyl.element, false)
-    } else if (syl.element) {
-        syl.element.classList.add('current-word')
+        const prevCurrent = document.querySelector('.current-word')
+        if (prevCurrent) prevCurrent.classList.remove('current-word')
+        syl.element.classList.add('current-word', 'playing-word')
         _scrollSyncElementIntoView(syl.element, false)
     }
+
+    lastWordIndex = currentWordIndex
+    currentWordIndex++
     renderTimeline()
     if (isPreviewActive()) refreshLyricsPlusPreview()
 }
