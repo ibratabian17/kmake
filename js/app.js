@@ -222,7 +222,18 @@ function extractAgentDeclaration(text) {
     return null;
 }
 
-function reset() {
+function reset(isNewProject = false) {
+    if (!isNewProject && typeof editorSettings !== 'undefined' && editorSettings.confirmReset) {
+        const hasWork = (tempLyrics && tempLyrics.some(l => l && !l.isTaggedLine && (l.text || '').trim())) ||
+            (elem_lyricsInput && elem_lyricsInput.value.trim() !== '') ||
+            Boolean(music_file || currentYoutubeId)
+        if (hasWork) {
+            const confirmed = window.confirm('Are you sure you want to reset the editor? Your active project in the Projects list will be preserved.')
+            if (!confirmed) return false
+            saveCurrentProjectToStorage()
+        }
+    }
+
     currentLyrics = []
     tempLyrics = []
     allSyllables = []
@@ -232,10 +243,29 @@ function reset() {
     importedJSON = false
     filename = ''
     selectedWordIndex = -1
+    if (typeof selectedWordIndices !== 'undefined' && selectedWordIndices && selectedWordIndices.clear) {
+        selectedWordIndices.clear()
+    }
     played_word = ''
     lastPlayedSylId = ''
     metadataEverOpened = false
     _pendingExportFn = null
+    hasUnsavedChanges = false
+    undoStack = []
+    redoStack = []
+
+    if (typeof _autoSaveTimer !== 'undefined' && _autoSaveTimer) {
+        clearTimeout(_autoSaveTimer)
+        _autoSaveTimer = null
+    }
+
+    music_file = null
+    currentYoutubeId = ''
+    audioPeaks = null
+    audioDurationSec = 0
+
+    // Always allocate a fresh project ID so reset state never overwrites an existing project
+    currentProjectId = 'proj_' + Date.now()
 
     metadata = {
         source: "",
@@ -248,11 +278,14 @@ function reset() {
         curator: getSavedCurator()
     }
 
-    if (player) player.source = { type: 'audio', sources: [] }
+    if (player) {
+        try { player.stop() } catch (e) {}
+        player.source = { type: 'audio', sources: [] }
+    }
 
-    elem_musicInput.value = ''
-    elem_lyricsInput.value = ''
-    elem_lyricsContent.innerHTML = ''
+    if (elem_musicInput) elem_musicInput.value = ''
+    if (elem_lyricsInput) elem_lyricsInput.value = ''
+    if (elem_lyricsContent) elem_lyricsContent.innerHTML = ''
 
     const t = document.getElementById('music-title')
     const a = document.getElementById('music-artist')
@@ -264,7 +297,38 @@ function reset() {
     if (art) art.src = ''
 
     unselect()
+    rebuildLyricsDOM()
+    renderTimeline()
+    _updatePreviewSongCard()
+    if (typeof isPreviewActive === 'function' && isPreviewActive() && typeof refreshLyricsPlusPreview === 'function') {
+        refreshLyricsPlusPreview()
+    }
+    return true
 }
+
+function createNewProject(force = false) {
+    const rawInputText = elem_lyricsInput ? elem_lyricsInput.value : ''
+    const lyricLines = tempLyrics.filter(l => l && !l.isTaggedLine && (l.text || '').trim())
+    const hasAudio = Boolean(music_file || currentYoutubeId)
+    const hasContent = lyricLines.length > 0 || rawInputText.trim() !== '' || hasAudio || Boolean(metadata && metadata.title && metadata.title.trim())
+
+    if (hasContent && !force) {
+        if (typeof editorSettings !== 'undefined' && editorSettings.confirmReset && hasUnsavedChanges) {
+            const proceed = window.confirm('Save current project and create a new one?')
+            if (!proceed) return false
+        }
+        // Always safely persist the current project before creating a new one!
+        saveCurrentProjectToStorage()
+    }
+
+    reset(true)
+    toggleHomePage(false)
+    if (typeof showToast === 'function') {
+        showToast(hasContent ? 'Started new project. Previous project saved.' : 'Started new project')
+    }
+    return true
+}
+window.createNewProject = createNewProject
 
 // Rebuild flat allSyllables cursor after any tempLyrics mutation.
 function buildAllSyllables() {
@@ -1779,7 +1843,7 @@ function importKMAKE() {
     input.type = 'file'
     input.accept = '.kmake'
     input.onchange = e => {
-        reset()
+        reset(true)
 
         const file = e.target.files[0]
         if (file) {
@@ -2372,7 +2436,7 @@ if (typeof tippy !== 'undefined') {
         ...menuHooks('menu-file'),
         content: `
         <div class="dropdown-content">
-            <button onclick="reset()">
+            <button onclick="createNewProject()">
                 <i data-lucide="file-plus" class="menu-icon"></i> New Project
             </button>
             <button onclick="importAnyLyricsFile()">
@@ -3510,7 +3574,21 @@ function _saveProjectsList(list) {
     _memoryProjectsList = liteList
     try {
         localStorage.setItem('kmake_projects_list_v1', JSON.stringify(liteList))
-    } catch (e) {}
+    } catch (e) {
+        // Fallback for localStorage quota limits: strip bulky syllable/plaintext data from localStorage
+        // because full project records and audio are safely stored in IndexedDB.
+        try {
+            const compactList = liteList.map(p => {
+                const c = { ...p }
+                delete c.tempLyrics
+                delete c.plainText
+                return c
+            })
+            localStorage.setItem('kmake_projects_list_v1', JSON.stringify(compactList))
+        } catch (err) {
+            console.warn('Could not save projects list to localStorage', err)
+        }
+    }
 }
 
 function saveCurrentProjectToStorage() {
@@ -3582,6 +3660,7 @@ function saveCurrentProjectToStorage() {
 
     const idbRecord = { ...projEntry, audioBlob: music_file || null }
     _idbPutProject(idbRecord)
+    hasUnsavedChanges = false
 }
 
 function _markDirtyAndAutoSave() {
@@ -6014,13 +6093,11 @@ function renderHomeProjectsList() {
 }
 
 function createNewProjectFromHome() {
-    saveCurrentProjectToStorage()
-    currentProjectId = 'proj_' + Date.now()
-    reset()
-    toggleHomePage(false)
+    createNewProject(true)
 }
 
 function importProjectFromHome() {
+    saveCurrentProjectToStorage()
     importAnyLyricsFile(() => {
         saveCurrentProjectToStorage()
         toggleHomePage(false)
@@ -6044,7 +6121,7 @@ function _applyLoadedProjectObject(proj) {
     if (musicTitleEl) musicTitleEl.innerText = metadata.title || ''
     if (musicArtistEl) musicArtistEl.innerText = metadata.artist || ''
     if (musicAlbumEl) musicAlbumEl.innerText = metadata.album || ''
-    if (musicArtEl && proj.artSrc) musicArtEl.src = proj.artSrc
+    if (musicArtEl) musicArtEl.src = proj.artSrc || ''
 
     if (proj.audioBlob && (proj.audioBlob instanceof Blob)) {
         music_file = proj.audioBlob
@@ -6062,6 +6139,15 @@ function _applyLoadedProjectObject(proj) {
             sources: [{ src: proj.currentYoutubeId, provider: 'youtube' }]
         }
         _generateSyntheticWaveform(proj.currentYoutubeId, 210)
+    } else {
+        music_file = null
+        currentYoutubeId = ''
+        audioPeaks = null
+        audioDurationSec = 0
+        if (player) {
+            try { player.stop() } catch (e) {}
+            player.source = { type: 'audio', sources: [] }
+        }
     }
 
     if (tempLyrics.length === 0 && elem_lyricsInput.value.trim() !== '') {
@@ -6078,6 +6164,7 @@ function _applyLoadedProjectObject(proj) {
 }
 
 function openSavedProject(projId) {
+    saveCurrentProjectToStorage()
     _idbGetProject(projId).then(idbProj => {
         if (idbProj) {
             _applyLoadedProjectObject(idbProj)
@@ -6090,9 +6177,16 @@ function openSavedProject(projId) {
 }
 
 function deleteSavedProject(projId) {
+    if (typeof editorSettings !== 'undefined' && editorSettings.confirmReset) {
+        if (!confirm('Are you sure you want to delete this project?')) return
+    }
     const list = _getSavedProjectsList().filter(p => p.id !== projId)
     _saveProjectsList(list)
     _idbDeleteProject(projId)
+    if (currentProjectId === projId) {
+        currentProjectId = 'proj_' + Date.now()
+        reset(true)
+    }
     renderHomeProjectsList()
 }
 
