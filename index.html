@@ -42,10 +42,9 @@
 
     <div id="header">
         <div class="header-content">
-            <img src="assets/kmake-logo.png" class="logo" />
+            <img src="assets/kmake-logo.png" class="logo" onclick="toggleHomePage(true)" title="Back to Projects" />
             <span class="header-divider"></span>
             <div class="buttons-actions">
-                <button id="btn-nav-home" data-active="true" onclick="toggleHomePage()" title="Projects">Projects</button>
                 <button id="menu-file" class="editor-menu-btn" style="display:none">File</button>
                 <button id="menu-song" class="editor-menu-btn" style="display:none">Song</button>
                 <button id="menu-tools" class="editor-menu-btn" style="display:none">Tools</button>
@@ -105,8 +104,8 @@
                     </div>
                 </div>
                 <div class="inner-part-buttons buttons-top" id="toolbar-sync">
-                    <button onclick="nextWord()" id="nextword-button">Next word <span id="lbl-key-stamp">(Enter)</span></button>
-                    <button onclick="stepBackWord()" id="stepback-button">Step back <span id="lbl-key-back">(Backspace)</span></button>
+                    <button onmousedown="event.preventDefault()" onclick="nextWord()" id="nextword-button">Next word <span id="lbl-key-stamp">(Enter)</span></button>
+                    <button onmousedown="event.preventDefault()" onclick="stepBackWord()" id="stepback-button">Step back <span id="lbl-key-back">(Backspace)</span></button>
                 </div>
                 <div class="inner-part-buttons buttons-top" id="toolbar-timeline" style="display:none">
                     <button id="tl-btn-follow" class="enabled" onclick="toggleTimelineFollow()">

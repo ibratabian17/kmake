@@ -529,9 +529,16 @@ function parseAppleTTML(ttml, offset = 0, separate = false) {
             for (const sp of allSpansInP) {
               if (processedSpans.has(sp)) continue;
 
-              const isBg = isInsideBackgroundWrapper(sp, p);
-              if (isBg) {
-                getElementsByLocalName(sp, 'span').forEach(nested => processedSpans.add(nested));
+              const roleAttr = getAttr(sp, 'role', 'ttm:role');
+              const nestedTimedSpans = getElementsByLocalName(sp, 'span').filter(s => getAttr(s, 'begin'));
+              if (roleAttr === 'x-bg' && nestedTimedSpans.length > 0) {
+                processedSpans.add(sp);
+                continue;
+              }
+
+              const isBg = roleAttr === 'x-bg' || isInsideBackgroundWrapper(sp, p);
+              if (nestedTimedSpans.length > 0) {
+                nestedTimedSpans.forEach(nested => processedSpans.add(nested));
               }
               processedSpans.add(sp);
 
@@ -544,7 +551,10 @@ function parseAppleTTML(ttml, offset = 0, separate = false) {
               }
               spanText = decodeHtmlEntities(spanText);
 
-              const tail = collectTailText(sp);
+              let tail = collectTailText(sp);
+              if (!tail && isBg && sp.parentNode && sp.parentNode !== p && getAttr(sp.parentNode, 'role', 'ttm:role') === 'x-bg' && !sp.nextElementSibling) {
+                tail = collectTailText(sp.parentNode);
+              }
               if (tail && !separate) spanText += decodeHtmlEntities(tail);
 
               if (spanText.trim() === '' && (!tail || !tail.includes(' '))) continue;
