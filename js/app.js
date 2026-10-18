@@ -93,30 +93,10 @@ function _forcePlyrAudioMode() {
         plyCont.classList.add('plyr--audio')
     }
 }
-let _ytFastPollTimer = null
-function _startYoutubeFastTimeSync() {
-    if (_ytFastPollTimer) clearInterval(_ytFastPollTimer)
-    if (!currentYoutubeId) return
-    _ytFastPollTimer = setInterval(() => {
-        if (!currentYoutubeId || !player || player.paused) return
-        if (player.embed && typeof player.embed.getCurrentTime === 'function') {
-            try {
-                const t = Number(player.embed.getCurrentTime())
-                if (!isNaN(t) && t >= 0 && player.media) {
-                    player.media.currentTime = t
-                }
-            } catch (e) {}
-        }
-    }, 16)
-}
-
 player.on('ready', () => {
     _forcePlyrAudioMode()
-    if (currentYoutubeId) {
-        _startYoutubeFastTimeSync()
-        if (player.duration > 0) {
-            _generateSyntheticWaveform(currentYoutubeId, player.duration)
-        }
+    if (currentYoutubeId && player.duration > 0) {
+        _generateSyntheticWaveform(currentYoutubeId, player.duration)
     }
 })
 player.on('controlshidden', _forcePlyrAudioMode)
@@ -1108,7 +1088,6 @@ window.addEventListener('message', function (event) {
         if (data && data.event === 'infoDelivery' && data.info && typeof data.info.currentTime === 'number') {
             _ytLastMediaSec = data.info.currentTime
             _ytLastPerfMs = performance.now()
-            if (player && player.media) player.media.currentTime = data.info.currentTime
         }
     } catch (e) {}
 })
@@ -4331,9 +4310,6 @@ function stepBackWord() {
             _recalcLineBounds(line)
             _notifyPlayerSeek(seekTargetSec)
             player.currentTime = seekTargetSec
-            if (currentYoutubeId && player.embed && typeof player.embed.seekTo === 'function') {
-                try { player.embed.seekTo(seekTargetSec, true) } catch (e) {}
-            }
         }
     }
     if (centerMode === 'timeline') renderTimeline()
