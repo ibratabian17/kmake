@@ -650,6 +650,8 @@ button.enabled:hover {
     transform: none;
     transition: none;
     white-space: normal;
+    content-visibility: visible !important;
+    contain: none !important;
 }
 
 #lyrics-content .lyrics-line.tagged-line {
