@@ -87,7 +87,7 @@ async function runRomanizer(provider, lines, ctx) {
 // Lyric romanization is plain Latin, so strip them: ā -> a, ḥ -> h, ʿ -> '.
 const SEMITIC = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
 const toPlainLatin = (str) => String(str || '')
-  .normalize('NFD').replace(/\p{M}/gu, '').replace(/[ʿʾʻʼ‘’`]/g, "'").normalize('NFC');
+  .normalize('NFD').replace(/\p{M}/gu, '').replace(/[ʿʾʻʼ‘’`]/g, "'").replace(/،/g, ',').replace(/؟/g, '?').replace(/؛/g, ';').normalize('NFC');
 
 function plainifyResult(result, line, script) {
   if (!result || script !== 'latin' || !SEMITIC.test(line.text)) return result;

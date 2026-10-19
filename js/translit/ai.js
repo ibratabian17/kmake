@@ -4,7 +4,7 @@ import {
   fetchWithRetry, parseJsonLoose, chunkArray, mapLimit, stripMarkers, isInTargetScript, throwIfAborted, normalizeForCompare
 } from './utils.js';
 import {
-  translationSystemPrompt, romanizationSystemPrompt, repairPrompt, detectSourceScripts
+  translationSystemPrompt, romanizationSystemPrompt, repairPrompt, detectSourceScripts, TARGET_SCRIPTS
 } from './prompts.js';
 
 const MAX_ATTEMPTS = 3;
@@ -89,7 +89,7 @@ async function converse({ provider, settings, system, firstMessage, validate, si
       const { valid, missing } = validate(parseJsonLoose(reply), accepted);
       valid.forEach((value, key) => accepted.set(key, value));
       if (missing.length === 0) return accepted;
-      messages.push({ role: 'assistant', content: reply }, { role: 'user', content: repairPrompt(validate.label, missing) });
+      messages.push({ role: 'assistant', content: reply }, { role: 'user', content: repairPrompt(validate.label, missing, validate.hint) });
     } catch (error) {
       if (error.name === 'AbortError') throw error;
       lastError = error;
@@ -166,27 +166,35 @@ function romanizationValidator(items, targetScript) {
     for (const entry of list) {
       const i = Number(entry?.original_line_index);
       const src = byIndex.get(i);
-      if (!src || accepted.has(i) || typeof entry?.text !== 'string' || !entry.text.trim()) continue;
-      if (!isInTargetScript(entry.text, targetScript)) continue;
-      let chunks = null;
-      if (src.syllables.length) {
-        const raw = Array.isArray(entry.chunk) ? entry.chunk : [];
-        const sorted = [...raw].sort((a, b) => (a?.chunkIndex ?? 0) - (b?.chunkIndex ?? 0));
-        const texts = sorted.map((c) => (typeof c?.text === 'string' ? c.text : ''));
-        if (texts.length === src.syllables.length && texts.every((t, k) => t.trim() || !src.syllables[k].trim())) {
-          if (targetScript !== 'latin' && !texts.every((t, k) => !src.syllables[k].trim() || isInTargetScript(t.trim(), targetScript))) continue;
-          // Weak models repeat or drop words inside chunks (e.g. "Shollallahu | allah | 'ala"):
-          // if the chunks don't spell the same line as "text", discard them entirely.
-          const sameLine = normalizeForCompare(texts.join('')) === normalizeForCompare(entry.text);
-          chunks = sameLine && chunksLookSane(texts, src.syllables) ? texts : null;
-        }
+      if (!src || accepted.has(i)) continue;
+
+      // Chunks usable only if complete and written in the target script.
+      let texts = null;
+      if (src.syllables.length && Array.isArray(entry.chunk)) {
+        const sorted = [...entry.chunk].sort((a, b) => (a?.chunkIndex ?? 0) - (b?.chunkIndex ?? 0));
+        const t = sorted.map((c) => (typeof c?.text === 'string' ? c.text : ''));
+        const complete = t.length === src.syllables.length && t.every((x, k) => x.trim() || !src.syllables[k].trim());
+        const inScript = complete && t.every((x, k) => !src.syllables[k].trim() || isInTargetScript(x.trim(), targetScript));
+        if (inScript) texts = t;
       }
-      valid.set(i, { text: entry.text, chunks });
+
+      let text = typeof entry?.text === 'string' ? entry.text : '';
+      // Weak models sometimes echo the source line in "text" and put the romanization only in the
+      // chunks: rebuild the line from the chunks instead of rejecting it.
+      if ((!text.trim() || !isInTargetScript(text, targetScript)) && texts) text = texts.join('');
+      if (!text.trim() || !isInTargetScript(text, targetScript)) continue;
+
+      // Weak models also repeat or drop words inside chunks (e.g. "Shollallahu | allah | 'ala"):
+      // if the chunks don't spell the same line as "text", discard them entirely.
+      const chunks = texts && normalizeForCompare(texts.join('')) === normalizeForCompare(text) && chunksLookSane(texts, src.syllables)
+        ? texts : null;
+      valid.set(i, { text, chunks });
     }
     const missing = items.map((x) => x.i).filter((i) => !accepted.has(i) && !valid.has(i));
     return { valid, missing };
   };
   validate.label = 'romanization';
+  validate.hint = `"text" and every chunk "text" must be the transliteration written in ${TARGET_SCRIPTS[targetScript] || 'Latin'} letters. Never copy the source_text or the chunk "source" values.`;
   return validate;
 }
 
@@ -214,8 +222,8 @@ export async function aiRomanize(lines, { provider, settings, targetScript = 'la
   await mapLimit(chunkArray(items, ROMANIZE_BATCH), 2, async (batch) => {
     const payload = batch.map((x) => ({
       original_line_index: x.i,
-      text: x.text,
-      ...(x.syllables.length ? { chunk: x.syllables.map((t, k) => ({ chunkIndex: k, text: t })) } : {})
+      source_text: x.text,
+      ...(x.syllables.length ? { chunk: x.syllables.map((t, k) => ({ chunkIndex: k, source: t })) } : {})
     }));
     const result = await converse({
       provider, settings, system, signal,

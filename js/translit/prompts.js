@@ -73,13 +73,14 @@ export function romanizationSystemPrompt({ scripts, targetScript, targetLang, so
 ${songBlock(song)}Write how each line SOUNDS in natural singing, using ${label} script. This is not translation: never replace words with equivalents.${latin ? ` Follow the spelling conventions readers of ${targetLang || 'English'} expect.` : ''}
 
 ${rules ? `Source rules:\n${rules}\n\n` : ''}Structure rules (the output is machine-parsed):
+0. Each input item has "source_text" (the original line) and optionally "chunk" entries with a "source" value each.
 1. One output item per input item, same "original_line_index".
-2. "text" is the whole transliterated line.
-3. If an input line has "chunk", output "chunk" with the same number of entries and the same "chunkIndex" values. Each entry is the transliteration of THAT chunk only, keeping its leading/trailing spaces, and all chunk texts joined together must equal "text" exactly. Never merge chunks, never leave one empty, and never output a chunk that is only punctuation: an apostrophe (hamza/ayn) belongs to the letters it precedes, inside the same chunk. When one spoken word covers two chunks (assimilation, liaison), cut the romanized word at the nearest syllable boundary between them instead of putting it all in one chunk.
+2. Output "text" is the whole transliterated line, written in ${label} script. Never copy "source_text" into it.
+3. If an input line has "chunk", output "chunk" with the same number of entries and the same "chunkIndex" values. Each output entry has a "text" that is the transliteration of THAT chunk's "source" only, keeping its leading/trailing spaces, and all chunk texts joined together must equal "text" exactly. Never merge chunks, never leave one empty, and never output a chunk that is only punctuation: an apostrophe (hamza/ayn) belongs to the letters it precedes, inside the same chunk. When one spoken word covers two chunks (assimilation, liaison), cut the romanized word at the nearest syllable boundary between them instead of putting it all in one chunk.
 4. Text already in ${label} script stays as is. Keep punctuation, digits and spacing.${latin ? `\n5. Use plain ASCII letters only (a-z, A-Z) plus the straight apostrophe. NEVER use diacritics, macrons, dots below or special letters (ā ī ū ḥ ṣ ḍ ṭ ẓ ġ š ʿ ʾ are forbidden). The only exception is Chinese Pinyin tone marks.` : `\n5. No source-script letters may remain; every chunk must contain ${label} letters.`}
 
 Respond with JSON only: {"romanized_lyrics":[{"original_line_index":0,"text":"...","chunk":[{"chunkIndex":0,"text":"..."}]}]}`;
 }
 
-export const repairPrompt = (what, indices) =>
-  `Your previous answer was missing, invalid or incomplete for ${what} index(es): [${indices.join(', ')}]. Return ONLY those items again as the same JSON object, nothing else.`;
+export const repairPrompt = (what, indices, hint = '') =>
+  `Your previous answer was missing, invalid or incomplete for ${what} index(es): [${indices.join(', ')}].${hint ? ` ${hint}` : ''} Return ONLY those items again as the same JSON object, nothing else.`;
