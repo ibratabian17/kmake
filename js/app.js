@@ -519,13 +519,18 @@ function parseNewKpoeFormat(jsonData) {
         }
 
         const translitSyls = item.transliteration?.syllabus || []
+        let translitTexts = translitSyls.map(t => t.text)
+        if (translitTexts.length && translitTexts.length !== rawSyllabus.length && item.transliteration?.text && window.KmakeTranslit) {
+            const origTexts = rawSyllabus.map(s => (s.text || '').replace(/]/g, ''))
+            translitTexts = window.KmakeTranslit.alignChunks(item.transliteration.text, origTexts, origTexts)
+        }
         const syllabus = rawSyllabus.map((s, si) => ({
             time: s.time || 0,
             duration: s.duration || 0,
             text: s.text || '',
             isDone: (s.time || 0) > 0,
             isBackground: !!s.isBackground,
-            romanizedText: s.romanizedText || translitSyls[si]?.text,
+            romanizedText: s.romanizedText || translitTexts[si],
             element: null
         }))
 
@@ -536,6 +541,7 @@ function parseNewKpoeFormat(jsonData) {
         }
 
         const translatedText = item.translatedText || item.translation?.text
+        if (item.translation?.lang && !metadata.translationLang) metadata.translationLang = item.translation.lang
         const romanizedText = item.romanizedText || item.transliteration?.text
 
         newLyrics.push({
@@ -1696,6 +1702,8 @@ function prepareNewKpoeJSON(cleanTiming = true) {
     const tSec = ((durMs % 60000) / 1000).toFixed(3)
     metadata.totalDuration = tMin + ':' + String(tSec).padStart(6, '0')
 
+    const translitLang = _translitLangTag()
+    const translationLang = metadata.translationLang || 'en'
     const exportedLyrics = tempLyrics
         .filter(l => {
             if (l.isTaggedLine) return false;
@@ -1715,9 +1723,16 @@ function prepareNewKpoeJSON(cleanTiming = true) {
                     text: (s.text || '').replace(/\]/g, '')
                 };
                 if (s.isBackground) out.isBackground = true;
-                if (s.romanizedText) out.romanizedText = s.romanizedText;
                 return out;
             });
+            const hasSylRom = rawFiltered.some(s => s.romanizedText && s.romanizedText.trim())
+            const romSyllabus = hasSylRom
+                ? rawFiltered.map((s, i) => ({
+                    time: cleanedSyllables[i].time,
+                    duration: cleanedSyllables[i].duration,
+                    text: s.romanizedText || cleanedSyllables[i].text
+                }))
+                : null
 
             let actualLineDuration = Math.round(line.duration || 0);
             if (cleanedSyllables.length > 0) {
@@ -1737,8 +1752,12 @@ function prepareNewKpoeJSON(cleanTiming = true) {
                     songPartIndex: line.element?.songPartIndex ?? -1
                 }
             };
-            if (line.romanizedText) lineOut.romanizedText = line.romanizedText;
-            if (line.translatedText) lineOut.translatedText = line.translatedText;
+            if (romSyllabus) {
+                lineOut.transliteration = { lang: translitLang, text: romSyllabus.map(s => s.text).join(''), syllabus: romSyllabus }
+            } else if (line.romanizedText) {
+                lineOut.transliteration = { lang: translitLang, text: line.romanizedText }
+            }
+            if (line.translatedText) lineOut.translation = { lang: translationLang, text: line.translatedText }
             return lineOut;
         });
 
@@ -4558,19 +4577,38 @@ function onSelectedSyllableRomanizedInput(val) {
     const syl = line?.syllabus[entry.syllabusIdx]
     if (!syl) return
 
-    const origClean = (syl.text || '').replace(/]/g, '')
-    const trail = (origClean.match(/\s+$/) || [''])[0]
+    const trail = _sylTrailing(syl)
     const trimmed = (val || '').trim()
     syl.romanizedText = trimmed ? (trimmed + trail) : undefined
 
-    if (line.syllabus.some(s => s.romanizedText)) {
-        line.romanizedText = line.syllabus.map(s => s.romanizedText || (s.text || '').replace(/]/g, '')).join('')
-        const lRom = document.getElementById('properties-line-romanized')
-        if (lRom) lRom.value = line.romanizedText
-    }
+    _refreshLineRomanizedText(line)
+    const lRom = document.getElementById('properties-line-romanized')
+    if (lRom && line.romanizedText) lRom.value = line.romanizedText
 
     _markDirtyAndAutoSave()
     if (isPreviewActive()) refreshLyricsPlusPreview()
+}
+
+const _SCRIPT_LANG = { japanese: 'ja', korean: 'ko', chinese: 'zh', cyrillic: 'ru', arabic: 'ar', hebrew: 'he', devanagari: 'hi', thai: 'th', greek: 'el' }
+
+function _translitLangTag() {
+    const base = String(metadata.language || '').split(/[-_]/)[0].toLowerCase()
+    if (base) return base + '-Latn'
+    const texts = tempLyrics.filter(l => l && !l.isTaggedLine).map(l => (l.text || '').replace(/]/g, ''))
+    const ctx = window.KmakeTranslit ? window.KmakeTranslit.detectLanguageContext(texts) : ''
+    return (_SCRIPT_LANG[ctx] || 'und') + '-Latn'
+}
+
+function _sylTrailing(syl) {
+    const own = (syl.romanizedText || '').match(/\s+$/)
+    if (own) return own[0]
+    return ((syl.text || '').replace(/]/g, '').match(/\s+$/) || [''])[0]
+}
+
+function _refreshLineRomanizedText(line) {
+    line.romanizedText = line.syllabus.some(s => s.romanizedText)
+        ? line.syllabus.map(s => s.romanizedText || (s.text || '').replace(/]/g, '')).join('')
+        : undefined
 }
 
 function _distributeRomanizationOnLine(line, romText) {
@@ -4581,52 +4619,41 @@ function _distributeRomanizationOnLine(line, romText) {
         line.syllabus.forEach(s => { delete s.romanizedText })
         return
     }
+    const sylls = line.syllabus
+    const origTexts = sylls.map(s => (s.text || '').replace(/]/g, ''))
     const tokens = splitTextWithSeparators(cleanRom).map(t => t.replace(/]/g, ''))
-    if (tokens.length === line.syllabus.length) {
-        line.syllabus.forEach((s, idx) => {
-            const origClean = (s.text || '').replace(/]/g, '')
-            const origTrail = (origClean.match(/\s+$/) || [''])[0]
-            const tokTrim = tokens[idx].trim()
-            s.romanizedText = tokTrim ? (tokTrim + origTrail) : undefined
+    const spaceParts = cleanRom.split(/\s+/).filter(Boolean)
+    let parts = null
+    if (tokens.length === sylls.length) parts = tokens.map(t => t.trim())
+    else if (spaceParts.length === sylls.length) parts = spaceParts
+
+    if (parts) {
+        sylls.forEach((s, i) => {
+            const trail = (origTexts[i].match(/\s+$/) || [''])[0]
+            s.romanizedText = parts[i] ? parts[i] + trail : undefined
         })
-    } else {
-        const spaceParts = cleanRom.split(/\s+/).filter(Boolean)
-        if (spaceParts.length === line.syllabus.length) {
-            line.syllabus.forEach((s, idx) => {
-                const origClean = (s.text || '').replace(/]/g, '')
-                const origTrail = (origClean.match(/\s+$/) || [''])[0]
-                s.romanizedText = spaceParts[idx] + origTrail
-            })
-        } else {
-            let wordIdx = 0
-            let curWordSyls = []
-            const flushWord = () => {
-                if (!curWordSyls.length) return
-                const romWord = spaceParts[wordIdx] || ''
-                wordIdx++
-                if (curWordSyls.length === 1) {
-                    const s = curWordSyls[0]
-                    const origTrail = ((s.text || '').replace(/]/g, '').match(/\s+$/) || [''])[0]
-                    s.romanizedText = romWord ? (romWord + origTrail) : undefined
-                } else {
-                    const chunkLen = Math.max(1, Math.ceil(romWord.length / curWordSyls.length))
-                    curWordSyls.forEach((s, ci) => {
-                        const isLast = ci === curWordSyls.length - 1
-                        const slice = isLast ? romWord.slice(ci * chunkLen) : romWord.slice(ci * chunkLen, (ci + 1) * chunkLen)
-                        const origTrail = ((s.text || '').replace(/]/g, '').match(/\s+$/) || [''])[0]
-                        s.romanizedText = (slice || romWord) + (isLast ? origTrail : '')
-                    })
-                }
-                curWordSyls = []
-            }
-            line.syllabus.forEach(s => {
-                curWordSyls.push(s)
-                if (/\s$/.test((s.text || '').replace(/]/g, ''))) flushWord()
-            })
-            flushWord()
-        }
+    } else if (window.KmakeTranslit) {
+        const guessed = sylls.every(s => s.romanizedText) ? null : window.KmakeTranslit.guessGuides(origTexts)
+        const guides = sylls.map((s, i) => s.romanizedText || guessed[i])
+        const chunks = window.KmakeTranslit.alignChunks(cleanRom, guides, origTexts)
+        sylls.forEach((s, i) => { s.romanizedText = chunks[i] && chunks[i].trim() ? chunks[i] : undefined })
     }
-    line.romanizedText = line.syllabus.map(s => s.romanizedText || (s.text || '').replace(/]/g, '')).join('')
+    _refreshLineRomanizedText(line)
+    if (!parts && !window.KmakeTranslit) line.romanizedText = cleanRom
+}
+
+function _applyRomanizationResult(line, result) {
+    if (!line || !result) return
+    const sylls = line.syllabus || []
+    if (result.chunks && result.chunks.length === sylls.length && sylls.length) {
+        sylls.forEach((s, i) => {
+            const c = (result.chunks[i] || '').replace(/]/g, '')
+            s.romanizedText = c.trim() ? c : undefined
+        })
+        _refreshLineRomanizedText(line)
+    } else {
+        _distributeRomanizationOnLine(line, result.text)
+    }
 }
 
 function onSelectedLineRomanizedChange(val) {
@@ -4644,11 +4671,6 @@ function onSelectedLineRomanizedChange(val) {
     }
     _markDirtyAndAutoSave()
     if (isPreviewActive()) refreshLyricsPlusPreview()
-}
-
-function distributeLineRomanizationToSyllables() {
-    const inp = document.getElementById('properties-line-romanized')
-    if (inp) onSelectedLineRomanizedChange(inp.value)
 }
 
 function onSelectedLineTranslatedInput(val) {
@@ -4926,7 +4948,7 @@ function prepareTTML(cleanTiming = true) {
     const validForMeta = tempLyrics.filter(l => l && !l.isTaggedLine && (l.text || '').replace(/\]/g, '').trim() !== '')
     const linesWithTrans = validForMeta.filter(l => l.translatedText && l.translatedText.trim())
     if (linesWithTrans.length > 0) {
-        xml += `<translations><translation type="subtitle" xml:lang="en">`
+        xml += `<translations><translation type="subtitle" xml:lang="${_escapeXml(metadata.translationLang || 'en')}">`
         linesWithTrans.forEach((l, idx) => {
             const k = _escapeXml(l.element?.key || ('L' + (idx + 1)))
             xml += `<text for="${k}">${_escapeXml(l.translatedText.trim())}</text>`
@@ -4935,7 +4957,7 @@ function prepareTTML(cleanTiming = true) {
     }
     const linesWithRom = validForMeta.filter(l => (l.romanizedText && l.romanizedText.trim()) || (l.syllabus || []).some(s => s.romanizedText && s.romanizedText.trim()))
     if (linesWithRom.length > 0) {
-        xml += `<transliterations><transliteration xml:lang="${lang}-Latn">`
+        xml += `<transliterations><transliteration xml:lang="${_escapeXml(_translitLangTag())}">`
         linesWithRom.forEach((l, idx) => {
             const k = _escapeXml(l.element?.key || ('L' + (idx + 1)))
             const hasSylRom = (l.syllabus || []).some(s => s.romanizedText && s.romanizedText.trim())
@@ -6336,6 +6358,7 @@ function openSettingsModal(initialCategory) {
         { id: 'playback', label: 'Playback', icon: 'play' },
         { id: 'timeline', label: 'Timeline', icon: 'sliders-horizontal' },
         { id: 'sync', label: 'Sync & Timing', icon: 'clock' },
+        { id: 'translit', label: 'Translation', icon: 'languages' },
         { id: 'shortcuts', label: 'Shortcuts', icon: 'keyboard' },
         { id: 'confirmations', label: 'Confirmations', icon: 'alert-triangle' },
         { id: 'storage', label: 'Save & Storage', icon: 'save' }
@@ -6397,6 +6420,26 @@ function filterSettingsModal(query) {
 
 function _buildSettingsSwitch(checked, onChangeCode) {
     return `<label class="m3-switch"><input type="checkbox" ${checked ? 'checked' : ''} onchange="${onChangeCode}" /><span class="m3-slider"></span></label>`
+}
+
+function _translitSettingsItems() {
+    const T = window.KmakeTranslit
+    if (!T) return []
+    const cfg = T.settings.get()
+    const select = (key, options) => `<select class="props-mini-input" onchange="_translitSet('${key}', this.value)">${options.map(([v, label]) => `<option value="${escapeHtmlAttr(v)}" ${cfg[key] === v ? 'selected' : ''}>${escapeHtmlAttr(label)}</option>`).join('')}</select>`
+    const field = (key, type, placeholder) => `<input type="${type}" class="props-mini-input" style="width:220px" autocomplete="off" spellcheck="false" placeholder="${escapeHtmlAttr(placeholder)}" value="${escapeHtmlAttr(cfg[key] || '')}" onchange="_translitSet('${key}', this.value.trim())" />`
+    const scripts = Object.entries(T.TARGET_SCRIPTS)
+    return [
+        { cat: 'translit', title: 'Advanced romanization', desc: 'Off: identical lyric lines (repeated chorus etc.) are merged into one row in the Romanization editor and edits apply to all of them. On: every line is listed and edited separately.', control: _buildSettingsSwitch(!!cfg.advancedRomanization, "_translitSet('advancedRomanization', this.checked)") },
+        { cat: 'translit', title: 'Romanization provider', desc: 'Offline uses built-in per-language romanizers. Google and AI providers are used as fallback when it cannot convert a line.', control: select('romanizationProvider', [['offline', 'Offline (built-in)'], ['google', 'Google'], ['gemini', 'Gemini AI'], ['openrouter', 'OpenRouter AI']]) },
+        { cat: 'translit', title: 'Translation provider', desc: 'AI providers translate with whole-song context and validate their own output; Google translates line by line.', control: select('translationProvider', [['google', 'Google'], ['gemini', 'Gemini AI'], ['openrouter', 'OpenRouter AI']]) },
+        { cat: 'translit', title: 'Default translation language', desc: 'Target language for new translations.', control: select('targetLang', T.LANGUAGES.map(l => [l.code, l.name])) },
+        { cat: 'translit', title: 'Romanization script', desc: 'Non-Latin target scripts need an AI provider.', control: select('targetScript', scripts) },
+        { cat: 'translit', title: 'Gemini API key', desc: 'Stored only in this browser and sent directly to Google.', control: field('geminiApiKey', 'password', 'AIza…') },
+        { cat: 'translit', title: 'Gemini model', desc: 'Any Gemini model id that supports JSON output.', control: field('geminiModel', 'text', 'gemini-2.5-flash') },
+        { cat: 'translit', title: 'OpenRouter API key', desc: 'Stored only in this browser and sent directly to OpenRouter.', control: field('openRouterApiKey', 'password', 'sk-or-…') },
+        { cat: 'translit', title: 'OpenRouter model', desc: 'Any OpenRouter model id.', control: field('openRouterModel', 'text', 'google/gemini-2.5-flash') }
+    ]
 }
 
 function renderSettingsCategoryPane(catId, searchQuery) {
@@ -6565,7 +6608,7 @@ function renderSettingsCategoryPane(catId, searchQuery) {
             desc: 'Remove all saved projects from IndexedDB and local browser storage.',
             control: `<button class="settings-pill-btn" onclick="try{localStorage.removeItem('kmake_projects_list_v1')}catch(e){}; _memoryProjectsList=[]; _idbClearAllProjects(); renderHomeProjectsList()"><i data-lucide="trash-2"></i> Clear storage</button>`
         }
-    ]
+    ].concat(_translitSettingsItems())
 
     const visibleItems = searchQuery
         ? allItems.filter(it => it.title.toLowerCase().includes(searchQuery) || it.desc.toLowerCase().includes(searchQuery))
@@ -6645,50 +6688,144 @@ function closeSettingsModal() {
     if (!modal) return
     modal.classList.remove('visible')
     setTimeout(() => modal.remove(), 200)
+    _refreshTranslitSummary()
+}
+
+let _translitAbort = null
+
+function _translitLyricLines() {
+    return tempLyrics.map((l, li) => ({ l, li })).filter(x => !x.l.isTaggedLine && (x.l.text || '').trim() !== '')
+}
+
+function _isAdvancedRom() {
+    return !!(window.KmakeTranslit && window.KmakeTranslit.settings.get().advancedRomanization)
+}
+
+function _translitSet(key, value) {
+    if (!window.KmakeTranslit) return
+    window.KmakeTranslit.settings.set({ [key]: value })
+    if (key === 'targetLang') metadata.translationLang = value
+    if (key === 'advancedRomanization') {
+        document.body.classList.toggle('adv-rom', !!value)
+        if (document.getElementById('translit-modal')) {
+            _flushTranslitModalInputs()
+            _renderTranslitRows()
+        }
+    }
+    _refreshTranslitSummary()
+}
+
+function _translitSummaryText() {
+    const T = window.KmakeTranslit
+    const cfg = T.settings.get()
+    const names = { offline: 'Offline', google: 'Google', gemini: 'Gemini', openrouter: 'OpenRouter' }
+    return `Romanize: ${names[cfg.romanizationProvider] || cfg.romanizationProvider} · Translate: ${names[cfg.translationProvider] || cfg.translationProvider} → ${T.languageName(metadata.translationLang || cfg.targetLang)}`
+}
+
+function _refreshTranslitSummary() {
+    const el = document.getElementById('translit-summary-text')
+    if (el && window.KmakeTranslit) el.textContent = _translitSummaryText()
+}
+
+function _translitToolbarHtml() {
+    const T = window.KmakeTranslit
+    if (!T) return `<p class="modal-hint" style="margin:0">Auto romanization is still loading or unavailable. Manual editing works as usual.</p>`
+    return `
+        <div class="translit-toolbar">
+            <div class="translit-toolbar-row">
+                <button class="settings-pill-btn" data-translit-run onclick="runTranslitJob('rom')"><i data-lucide="type"></i> Romanize</button>
+                <button class="settings-pill-btn" data-translit-run onclick="runTranslitJob('tr')"><i data-lucide="languages"></i> Translate</button>
+                <button class="settings-pill-btn" data-translit-run onclick="runTranslitJob('both')"><i data-lucide="sparkles"></i> Both</button>
+                <button class="settings-pill-btn" id="translit-cancel" style="display:none" onclick="cancelTranslitJob()"><i data-lucide="x"></i> Cancel</button>
+                <label class="translit-check"><input type="checkbox" id="translit-fill-empty"> Only fill empty lines</label>
+            </div>
+            <p class="modal-hint translit-summary">
+                <span id="translit-summary-text">${escapeHtmlAttr(_translitSummaryText())}</span>
+                <button class="btn-mini-link" onclick="openSettingsModal('translit')">Change in Settings</button>
+            </p>
+            <p class="modal-hint" id="translit-status" style="margin:0"></p>
+        </div>`
+}
+
+function _lineRomText(l) {
+    return ((l.syllabus || []).some(s => s.romanizedText)
+        ? l.syllabus.map(s => s.romanizedText || (s.text || '').replace(/]/g, '')).join('')
+        : (l.romanizedText || '')).trim()
+}
+
+// Groups identical lyric lines (same syllable split) so repeated lines are edited once.
+function _translitGroups() {
+    const rows = _translitLyricLines().map((x, idx) => ({ ...x, num: idx + 1 }))
+    if (_isAdvancedRom()) return rows.map(x => ({ rep: x, members: [x] }))
+    const map = new Map()
+    rows.forEach(x => {
+        const key = (x.l.syllabus || []).length
+            ? x.l.syllabus.map(sy => (sy.text || '').replace(/]/g, '')).join('\u0001')
+            : (x.l.text || '').replace(/]/g, '')
+        if (!map.has(key)) map.set(key, { rep: x, members: [] })
+        map.get(key).members.push(x)
+    })
+    return [...map.values()]
+}
+
+function _copyTranslitToLine(src, dst) {
+    if (!src || !dst || src === dst) return
+    ;(src.syllabus || []).forEach((sy, i) => {
+        const d = (dst.syllabus || [])[i]
+        if (!d) return
+        if (sy.romanizedText) d.romanizedText = sy.romanizedText
+        else delete d.romanizedText
+    })
+    dst.romanizedText = src.romanizedText
+    dst.translatedText = src.translatedText
+}
+
+function _renderTranslitRows() {
+    const cont = document.getElementById('translit-lines-container')
+    if (!cont) return
+    cont.innerHTML = _translitGroups().map(({ rep, members }) => {
+        const { l, li } = rep
+        const sylCells = (l.syllabus || []).map((s, si) => {
+            const cleanOrig = (s.text || '').replace(/]/g, '')
+            const curRom = (s.romanizedText || '').trim()
+            return `<div class="translit-syl-cell">
+                <span class="translit-syl-orig">${escapeHtmlAttr(cleanOrig)}</span>
+                <input type="text" class="translit-syl-in" data-li="${li}" data-si="${si}" data-orig="${escapeHtmlAttr(curRom)}" value="${escapeHtmlAttr(curRom)}" placeholder="${escapeHtmlAttr(cleanOrig.trim())}" />
+            </div>`
+        }).join('')
+        const tr = l.translatedText || ''
+        const nums = members.map(m => m.num)
+        const label = members.length > 1
+            ? `#${nums.slice(0, 3).join(', #')}${nums.length > 3 ? ` +${nums.length - 3}` : ''} <span class="translit-dup-badge" title="Lines ${nums.join(', ')} are identical; edits apply to all">×${members.length}</span>`
+            : `#${rep.num}`
+        return `<div class="translit-line-row" data-rep="${li}" data-members="${members.map(m => m.li).join(',')}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                <span style="font-size:0.78rem;font-weight:600;color:var(--md-sys-color-on-surface)">${label} · ${escapeHtmlAttr((l.text || '').replace(/]/g, ''))}</span>
+                <input type="text" class="props-mini-input translit-line-tr-in" data-li="${li}" data-orig="${escapeHtmlAttr(tr.trim())}" value="${escapeHtmlAttr(tr)}" placeholder="Line translation…" style="max-width:240px" />
+            </div>
+            <div class="translit-syl-grid">${sylCells}</div>
+        </div>`
+    }).join('')
 }
 
 function openTranslitModal() {
     const existing = document.getElementById('translit-modal')
     if (existing) existing.remove()
 
-    const lyricLines = tempLyrics.map((l, li) => ({ l, li })).filter(x => !x.l.isTaggedLine && (x.l.text || '').trim() !== '')
-    const romBulk = lyricLines.map(({ l }) => _syllabusToMarkup(l.syllabus.map(s => ({ text: s.romanizedText || s.text })), l.romanizedText || '')).join('\n')
-    const trBulk = lyricLines.map(({ l }) => l.translatedText || '').join('\n')
-
     const modal = document.createElement('div')
     modal.id = 'translit-modal'
     modal.className = 'kmake-modal'
     modal.innerHTML = `
-        <div class="kmake-modal-backdrop" onclick="this.closest('.kmake-modal').remove()"></div>
-        <div class="kmake-modal-content" style="max-width:740px">
+        <div class="kmake-modal-backdrop" onclick="closeTranslitModal()"></div>
+        <div class="kmake-modal-content" style="max-width:680px">
             <div class="kmake-modal-header">
                 <i data-lucide="languages" class="modal-header-icon"></i>
-                <h2>Syllable Romanization &amp; Translation Editor</h2>
-                <button onclick="this.closest('.kmake-modal').remove()" class="modal-close-btn"><i data-lucide="x"></i></button>
+                <h2>Romanization &amp; Translation</h2>
+                <button onclick="closeTranslitModal()" class="modal-close-btn"><i data-lucide="x"></i></button>
             </div>
-            <div class="tutorial-tabs">
-                <button class="tutorial-tab active" onclick="switchTutorialTab(this, 'tab-translit-syllables')">Per-Syllable Editor</button>
-                <button class="tutorial-tab" onclick="switchTutorialTab(this, 'tab-translit-bulk')">Bulk Line Paste</button>
-            </div>
-            <div class="kmake-modal-body" style="max-height:66vh">
-                <div id="tab-translit-syllables" class="tutorial-tab-panel active" style="padding:0;gap:10px">
-                    <p class="modal-hint" style="margin:0">Each syllable has its own <code>romanizedText</code> (matching LyricsPlusRenderer format) plus optional line translation.</p>
-                    <div id="translit-lines-container" style="display:flex;flex-direction:column;gap:10px"></div>
-                </div>
-                <div id="tab-translit-bulk" class="tutorial-tab-panel" style="padding:0;gap:12px">
-                    <p class="modal-hint" style="margin:0">Paste 1 line per lyric line. Use <code>]</code> or spaces in Romanization to map directly to each syllable.</p>
-                    <div class="meta-row">
-                        <div class="meta-field">
-                            <label>Bulk Romanization (${lyricLines.length} lines)</label>
-                            <textarea id="bulk-rom-textarea" style="height:220px;background:var(--md-sys-color-surface-container-highest);border:1px solid var(--md-sys-color-outline-variant);border-radius:8px;color:var(--md-sys-color-on-surface);padding:8px;font-family:monospace;font-size:0.8rem">${escapeHtmlAttr(romBulk)}</textarea>
-                        </div>
-                        <div class="meta-field">
-                            <label>Bulk Translation (${lyricLines.length} lines)</label>
-                            <textarea id="bulk-tr-textarea" style="height:220px;background:var(--md-sys-color-surface-container-highest);border:1px solid var(--md-sys-color-outline-variant);border-radius:8px;color:var(--md-sys-color-on-surface);padding:8px;font-family:monospace;font-size:0.8rem">${escapeHtmlAttr(trBulk)}</textarea>
-                        </div>
-                    </div>
-                    <button class="btn-primary" style="align-self:flex-end" onclick="applyBulkTranslitAndTranslation()">Apply Bulk Text to All Syllables</button>
-                </div>
+            <div class="kmake-modal-body" style="max-height:66vh;display:flex;flex-direction:column;gap:10px">
+                ${_translitToolbarHtml()}
+                <div id="translit-lines-container" style="display:flex;flex-direction:column;gap:10px"></div>
             </div>
             <div class="kmake-modal-footer">
                 <button class="btn-primary" onclick="saveTranslitModal()">Done</button>
@@ -6696,83 +6833,138 @@ function openTranslitModal() {
         </div>
     `
     document.body.appendChild(modal)
-
-    const cont = modal.querySelector('#translit-lines-container')
-    lyricLines.forEach(({ l, li }, idx) => {
-        const row = document.createElement('div')
-        row.className = 'translit-line-row'
-        const sylCells = (l.syllabus || []).map((s, si) => {
-            const cleanOrig = (s.text || '').replace(/]/g, '')
-            const curRom = (s.romanizedText || '').trim()
-            return `<div class="translit-syl-cell">
-                <span class="translit-syl-orig">${escapeHtmlAttr(cleanOrig)}</span>
-                <input type="text" class="translit-syl-in" data-li="${li}" data-si="${si}" value="${escapeHtmlAttr(curRom)}" placeholder="${escapeHtmlAttr(cleanOrig.trim())}" />
-            </div>`
-        }).join('')
-        row.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-                <span style="font-size:0.78rem;font-weight:600;color:var(--md-sys-color-on-surface)">#${idx + 1} · ${escapeHtmlAttr((l.text || '').replace(/]/g, ''))}</span>
-                <input type="text" class="props-mini-input translit-line-tr-in" data-li="${li}" value="${escapeHtmlAttr(l.translatedText || '')}" placeholder="Line translation…" style="max-width:240px" />
-            </div>
-            <div class="translit-syl-grid">${sylCells}</div>
-        `
-        cont.appendChild(row)
-    })
-
+    _renderTranslitRows()
     requestAnimationFrame(() => { modal.classList.add('visible'); lucide.createIcons({ nodes: [modal] }) })
 }
 
-function applyBulkTranslitAndTranslation() {
-    const romArea = document.getElementById('bulk-rom-textarea')
-    const trArea = document.getElementById('bulk-tr-textarea')
-    const romLines = (romArea?.value || '').split('\n')
-    const trLines = (trArea?.value || '').split('\n')
-    pushHistoryState()
-    let cursor = 0
-    tempLyrics.forEach(l => {
-        if (!l || l.isTaggedLine || !(l.text || '').trim()) return
-        if (romLines[cursor] !== undefined) {
-            _distributeRomanizationOnLine(l, romLines[cursor])
-        }
-        if (trLines[cursor] !== undefined) {
-            l.translatedText = trLines[cursor].trim() || undefined
-        }
-        cursor++
-    })
-    _markDirtyAndAutoSave()
-    if (isPreviewActive()) refreshLyricsPlusPreview()
+function closeTranslitModal() {
+    cancelTranslitJob()
     document.getElementById('translit-modal')?.remove()
+}
+
+function cancelTranslitJob() {
+    if (_translitAbort) _translitAbort.abort()
+}
+
+function _setTranslitBusy(busy) {
+    const modal = document.getElementById('translit-modal')
+    if (!modal) return
+    modal.querySelectorAll('[data-translit-run]').forEach(b => { b.disabled = busy })
+    const cancel = modal.querySelector('#translit-cancel')
+    if (cancel) cancel.style.display = busy ? '' : 'none'
+}
+
+function _setTranslitStatus(text) {
+    const el = document.getElementById('translit-status')
+    if (el) el.textContent = text
+}
+
+async function runTranslitJob(kind) {
+    const T = window.KmakeTranslit
+    const modal = document.getElementById('translit-modal')
+    if (!T || !modal || _translitAbort) return
+
+    const cfg = T.settings.get()
+    const wantRom = kind !== 'tr'
+    const wantTr = kind !== 'rom'
+    const missingKey = [wantRom ? cfg.romanizationProvider : null, wantTr ? cfg.translationProvider : null]
+        .find(p => (p === 'gemini' || p === 'openrouter') && !T.hasAiKey(p))
+    if (missingKey) {
+        _setTranslitStatus(`${missingKey === 'gemini' ? 'Gemini' : 'OpenRouter'} needs an API key. Add it in Settings → Translation.`)
+        return
+    }
+
+    _flushTranslitModalInputs()
+    const fillEmpty = modal.querySelector('#translit-fill-empty').checked
+    const groups = _translitGroups()
+    const rows = groups.map(g => g.rep)
+    const song = { title: metadata.title, language: metadata.language }
+    const controller = new AbortController()
+    _translitAbort = controller
+    _setTranslitBusy(true)
+    pushHistoryState()
+
+    const summary = []
+    try {
+        if (wantRom) {
+            const target = fillEmpty ? rows.filter(x => !x.l.romanizedText && !(x.l.syllabus || []).some(sy => sy.romanizedText)) : rows
+            _setTranslitStatus('Romanizing…')
+            const results = await T.romanizeLines(
+                target.map(x => ({ text: x.l.text, syllables: (x.l.syllabus || []).map(sy => sy.text) })),
+                { song, signal: controller.signal, onProgress: (d, t) => _setTranslitStatus(`Romanizing ${d}/${t}…`) }
+            )
+            let n = 0
+            target.forEach((x, i) => { if (results[i]) { _applyRomanizationResult(x.l, results[i]); n++ } })
+            groups.forEach(g => g.members.forEach(m => { if (m !== g.rep && g.rep.l.romanizedText) { m.l.syllabus.forEach((sy, k) => { const r = g.rep.l.syllabus[k]; if (r && r.romanizedText) sy.romanizedText = r.romanizedText; else delete sy.romanizedText }); m.l.romanizedText = g.rep.l.romanizedText } }))
+            summary.push(`Romanized ${n} line${n === 1 ? '' : 's'}`)
+        }
+        if (wantTr) {
+            const target = fillEmpty ? rows.filter(x => !x.l.translatedText) : rows
+            _setTranslitStatus('Translating…')
+            const lang = metadata.translationLang || cfg.targetLang
+            const results = await T.translateLines(
+                target.map(x => x.l.text),
+                { song, targetLang: lang, signal: controller.signal, onProgress: (d, t) => _setTranslitStatus(`Translating ${d}/${t}…`) }
+            )
+            let n = 0
+            target.forEach((x, i) => { x.l.translatedText = results[i] || undefined; if (results[i]) n++ })
+            groups.forEach(g => g.members.forEach(m => { if (m !== g.rep) m.l.translatedText = g.rep.l.translatedText }))
+            metadata.translationLang = lang
+            summary.push(`Translated ${n} line${n === 1 ? '' : 's'}`)
+        }
+        _setTranslitStatus(summary.join(' · ') || 'Nothing to do')
+    } catch (error) {
+        _setTranslitStatus(error.name === 'AbortError' ? 'Cancelled' : `Failed: ${error.message}`)
+    } finally {
+        _translitAbort = null
+        _setTranslitBusy(false)
+        _renderTranslitRows()
+        _markDirtyAndAutoSave()
+        if (isPreviewActive()) refreshLyricsPlusPreview()
+    }
+}
+
+function _flushTranslitModalInputs() {
+    const modal = document.getElementById('translit-modal')
+    if (!modal) return
+    const touched = new Set()
+    const touchedRom = new Set()
+    modal.querySelectorAll('.translit-syl-in').forEach(inp => {
+        const val = inp.value.trim()
+        if (val === inp.dataset.orig) return
+        const li = parseInt(inp.dataset.li, 10)
+        const syl = tempLyrics[li]?.syllabus[parseInt(inp.dataset.si, 10)]
+        if (!syl) return
+        syl.romanizedText = val ? val + _sylTrailing(syl) : undefined
+        inp.dataset.orig = val
+        touched.add(li)
+        touchedRom.add(li)
+    })
+    touchedRom.forEach(li => _refreshLineRomanizedText(tempLyrics[li]))
+    modal.querySelectorAll('.translit-line-tr-in').forEach(inp => {
+        const val = inp.value.trim()
+        if (val === inp.dataset.orig) return
+        const li = parseInt(inp.dataset.li, 10)
+        const line = tempLyrics[li]
+        if (line) line.translatedText = val || undefined
+        inp.dataset.orig = val
+        touched.add(li)
+    })
+    modal.querySelectorAll('.translit-line-row[data-members]').forEach(row => {
+        const rep = parseInt(row.dataset.rep, 10)
+        if (!touched.has(rep)) return
+        row.dataset.members.split(',').map(n => parseInt(n, 10)).forEach(li => {
+            if (li !== rep) _copyTranslitToLine(tempLyrics[rep], tempLyrics[li])
+        })
+    })
 }
 
 function saveTranslitModal() {
     const modal = document.getElementById('translit-modal')
     if (!modal) return
     pushHistoryState()
-    modal.querySelectorAll('.translit-syl-in').forEach(inp => {
-        const li = parseInt(inp.dataset.li, 10)
-        const si = parseInt(inp.dataset.si, 10)
-        const line = tempLyrics[li]
-        const syl = line?.syllabus[si]
-        if (!syl) return
-        const origClean = (syl.text || '').replace(/]/g, '')
-        const trail = (origClean.match(/\s+$/) || [''])[0]
-        const val = inp.value.trim()
-        syl.romanizedText = val ? (val + trail) : undefined
-    })
-    modal.querySelectorAll('.translit-line-tr-in').forEach(inp => {
-        const li = parseInt(inp.dataset.li, 10)
-        const line = tempLyrics[li]
-        if (line) line.translatedText = inp.value.trim() || undefined
-    })
-    tempLyrics.forEach(l => {
-        if (!l || l.isTaggedLine || !l.syllabus) return
-        if (l.syllabus.some(s => s.romanizedText)) {
-            l.romanizedText = l.syllabus.map(s => s.romanizedText || (s.text || '').replace(/]/g, '')).join('')
-        } else {
-            l.romanizedText = undefined
-        }
-    })
-    modal.remove()
+    _flushTranslitModalInputs()
+    closeTranslitModal()
     if (selectedWordIndex !== -1) openWord(selectedWordIndex)
     _markDirtyAndAutoSave()
     if (isPreviewActive()) refreshLyricsPlusPreview()
