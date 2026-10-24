@@ -1163,8 +1163,11 @@ function _getRealPlayerTimeSec() {
             }
         } catch (e) {}
     }
-    if (!currentYoutubeId && elem_musicPlayer && typeof elem_musicPlayer.currentTime === 'number' && !isNaN(elem_musicPlayer.currentTime)) {
-        return elem_musicPlayer.currentTime
+    if (!currentYoutubeId) {
+        const media = player.media || (player.elements && player.elements.container ? player.elements.container.querySelector('audio') : null) || document.querySelector('.plyr audio')
+        if (media && typeof media.currentTime === 'number' && !isNaN(media.currentTime)) {
+            return media.currentTime
+        }
     }
     return Number(player.currentTime) || 0
 }
@@ -2061,6 +2064,8 @@ elem_musicInput.addEventListener('change', function () {
 
     music_file = file
     currentYoutubeId = ''
+    _forcePlyrAudioMode()
+    setTimeout(_forcePlyrAudioMode, 150)
     _decodeAudioWaveform(file)
     _markDirtyAndAutoSave()
     document.getElementById('music-title').innerText = metadata.title || "Unknown Title"
